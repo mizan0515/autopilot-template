@@ -214,16 +214,18 @@ The loop also keeps planning and spec documents honest. On every Active-mode com
 
 ## Pacing (NEXT_DELAY)
 
-Before exit, write an integer in [60, 3600] to `.autopilot/NEXT_DELAY`. Runner reads it for the next sleep.
+Before exit, write an integer in [60, 3600] to `.autopilot/NEXT_DELAY`. Runner reads it for the next sleep. `ScheduleWakeup` clamps the same range.
 
-- Active mode mid-task waiting for a fast signal (build finishing, PR check): **270**
-- Active mode just completed: **900**
-- Idle-upkeep just ran: **1800**
-- Brainstorm just ran: **1800**
-- Environment broken: **1800** (don't hammer)
+**Default policy: move fast.** The loop's value comes from compounding iterations, not from sitting idle. Pick the smallest delay that still makes sense.
+
+- Active mode mid-task waiting for a fast signal (build finishing, PR check): **60**
+- Active mode just completed: **60**
+- Idle-upkeep just ran: **60**
+- Brainstorm just ran: **60**
+- Environment broken: **1800** (don't hammer a broken env)
 - Halted / probation-revert: **3600**
 
-**Avoid 300–900s range** when you expect to re-read large context on wake-up: Anthropic-family prompt caches typically expire around 5 minutes, so 300–900 forfeits the cache without amortizing the miss. Pick <300 (270 is the sweet spot) or ≥1200.
+Back-to-back iteration is the default. The only reasons to go long are: (a) env is broken and we need humans, (b) we halted, (c) operator explicitly asked for a cadence via `OPERATOR: pace <seconds>` in STATE.md — if present, that value wins over this table. 60s stays inside the Anthropic prompt-cache TTL (~5 min), so cache hits are preserved across wake-ups; avoid the 300–900s dead zone which pays a cache miss without amortizing it.
 
 ---
 
