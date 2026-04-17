@@ -47,24 +47,34 @@ switch ($Verb) {
 
   'check-reschedule' {
     # Detect "said it but didn't tool-call it" ScheduleWakeup failures.
-    # Compares LAST_RESCHEDULE vs now vs NEXT_DELAY. Exits 2 if overdue.
+    # Three checks (any fails -> exit 2):
+    #   1. LAST_RESCHEDULE exists and has 2 lines (1-line = narration-only forgery).
+    #   2. Line 2 (raw tool response) is non-empty and not identical to line 1.
+    #   3. Line 1 timestamp age < NEXT_DELAY + 600s slack.
     $ap = '.autopilot'
     $nd = Join-Path $ap 'NEXT_DELAY'
     $lr = Join-Path $ap 'LAST_RESCHEDULE'
     if (-not (Test-Path $nd)) { Write-Host "no NEXT_DELAY yet — loop hasn't completed an iteration"; exit 0 }
     if (-not (Test-Path $lr)) { Write-Warning 'NEXT_DELAY exists but LAST_RESCHEDULE missing — exit-contract step 5/6 likely skipped'; exit 2 }
-    $content = (Get-Content $lr -Raw).Trim()
-    if ($content -like 'halted*') { Write-Host "halted — no reschedule expected ($content)"; exit 0 }
+    $lines = @(Get-Content $lr)
+    $line1 = if ($lines.Count -ge 1) { $lines[0].Trim() } else { '' }
+    $line2 = if ($lines.Count -ge 2) { $lines[1].Trim() } else { '' }
+    if ($line1 -like 'halted*' -or $line1 -like 'external-runner:*') { Write-Host "legitimate skip on line 1 — no reschedule expected ($line1)"; exit 0 }
+    if ([string]::IsNullOrWhiteSpace($line2) -or $line2 -eq $line1) {
+      Write-Warning 'LAST_RESCHEDULE is 1-line or line-2 forged — narration-only sentinel, ScheduleWakeup likely not tool-called'
+      Write-Host '  -> per [IMMUTABLE:wake-reschedule] section 2, this is a failed reschedule.'
+      exit 2
+    }
     $delay = [int]((Get-Content $nd -Raw).Trim())
-    try { $ts = [DateTimeOffset]::Parse($content) } catch { Write-Warning "could not parse LAST_RESCHEDULE='$content'"; exit 2 }
+    try { $ts = [DateTimeOffset]::Parse($line1) } catch { Write-Warning "could not parse LAST_RESCHEDULE line 1='$line1'"; exit 2 }
     $age = [int]((Get-Date) - $ts.UtcDateTime).TotalSeconds
     $slack = 600
     if ($age -gt ($delay + $slack)) {
-      Write-Warning "reschedule overdue — last=$content age=${age}s NEXT_DELAY=${delay}s (slack ${slack}s)"
+      Write-Warning "reschedule overdue — line1=$line1 age=${age}s NEXT_DELAY=${delay}s (slack ${slack}s)"
       Write-Host '  -> loop likely stuck. re-anchor with /loop or runner.ps1.'
       exit 2
     }
-    Write-Host "ok: last=$content age=${age}s NEXT_DELAY=${delay}s"
+    Write-Host "ok: line1=$line1 line2=$line2 age=${age}s NEXT_DELAY=${delay}s"
   }
 
   default {

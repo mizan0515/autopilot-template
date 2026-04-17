@@ -68,7 +68,7 @@ One interactive Claude Code session keeps running; Claude self-paces via `Schedu
 
 If your `/loop` build doesn't accept a file argument, run `/loop` and paste the contents of `.autopilot/PROMPT.md` when prompted. Stop with `touch .autopilot/HALT` (graceful) or Ctrl+C (hard).
 
-> **Dynamic-mode gotcha (observed 2026-04-18):** In Mode A the agent self-paces by **calling the `ScheduleWakeup` tool** — writing "rescheduled" in prose does not schedule anything. If the tool call is skipped, the loop silently halts. The template now enforces this via exit-contract Step 5 (tool call), Step 6 (`LAST_RESCHEDULE` sentinel), and boot Step 5 (watchdog that flags missed reschedules on the next iter). If the loop appears stuck, run `bash .autopilot/project.sh check-reschedule` (or `.\project.ps1 check-reschedule`) to diagnose.
+> **Dynamic-mode gotcha (observed 2026-04-18, recurred same day):** In Mode A the agent self-paces by **calling the `ScheduleWakeup` tool** — writing "rescheduled" in prose does not schedule anything. If the tool call is skipped, the loop silently halts. The template enforces this via dual-channel evidence: exit-contract Step 5 (real tool call), Step 6 (2-line `LAST_RESCHEDULE` sentinel where line 2 = the tool's raw response, forgery-resistant), `[IMMUTABLE:wake-reschedule]` invariants, and boot Step 5 watchdog that flags 1-line or stale sentinels as high-severity FINDINGS. If the loop appears stuck, run `bash .autopilot/project.sh check-reschedule` (or `.\project.ps1 check-reschedule`) — exit 2 = not-rescheduled, re-anchor with `/loop`.
 
 **Use this when:** you're already using Claude Code interactively, you want zero infra, you want Claude's dynamic pacing (60s–3600s) honored.
 

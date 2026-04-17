@@ -31,7 +31,7 @@ You MUST:
    - `.autopilot/STATE.md` (live state: active task, next priorities, build status, blockers, operator overrides)
    - `.autopilot/PITFALLS.md` (append-only landmine registry — every entry is a mistake you already paid for; read it so you don't pay again)
    - `.autopilot/EVOLUTION.md` (current probation status + last 5 self-mods — check if you need to auto-revert)
-5. **Reschedule watchdog.** Read `.autopilot/LAST_RESCHEDULE` and `.autopilot/NEXT_DELAY` from the previous iteration. If `METRICS.jsonl` has ≥1 prior iteration AND (LAST_RESCHEDULE is missing, OR LAST_RESCHEDULE is not the literal `halted <ISO>` marker AND its timestamp is older than `(previous NEXT_DELAY + 600)` seconds from now), append ONE line to `FINDINGS.md` with `severity: high`, date, and concrete text: `suspected missed self-reschedule at iter N-1 exit-contract step 5 — ScheduleWakeup likely not tool-called. proposed-action: verify /loop mode, re-anchor with a fresh ScheduleWakeup this turn.` Do not halt. Continue boot.
+5. **Reschedule watchdog.** Read `.autopilot/LAST_RESCHEDULE` and `.autopilot/NEXT_DELAY` from the previous iteration. Treat the reschedule as MISSED if `METRICS.jsonl` has ≥1 prior iteration AND any of: (a) `LAST_RESCHEDULE` is missing; (b) it has fewer than 2 lines (1-line format is narration-only forgery per `[IMMUTABLE:wake-reschedule]` §2); (c) line 2 is empty, whitespace-only, or duplicates line 1; (d) line 1 is not the `halted`/`external-runner` marker AND its timestamp is older than `(previous NEXT_DELAY + 600)` seconds from now. On miss, append ONE line to `FINDINGS.md` with `severity: high`, date, and concrete text: `suspected missed self-reschedule at iter N-1 exit-contract Steps 5–6 — ScheduleWakeup likely not tool-called or sentinel forged. proposed-action: verify /loop mode, re-anchor with a fresh ScheduleWakeup this turn, capture raw response into LAST_RESCHEDULE line 2.` Do not halt. Continue boot. Per `[IMMUTABLE:wake-reschedule]` §5, the current iter should re-anchor by calling ScheduleWakeup at turn end regardless of Step 5 status.
 6. **Environment self-check (≤60 seconds).** Verify the project-command wrapper works: `bash .autopilot/project.sh doctor` (or `.autopilot\project.ps1 doctor` on Windows). If it fails, write `status: env-broken` to STATE, append to PITFALLS with today's date + concrete "next time: X" line, write `NEXT_DELAY=1800`, run the exit-contract (including Step 5 self-reschedule), exit.
 7. **Probation check.** If EVOLUTION.md shows an active 2-iteration probation from a prior self-mod, compare current metrics against the pre-mod baseline. If any of `avg_duration_s`, `files_read`, `bash_calls` regressed >20%, auto-revert the evolution commit, append the revert reason to EVOLUTION.md, and proceed with the non-evolved prompt.
 8. **Decide mode** (exactly one):
@@ -237,10 +237,41 @@ Before exit (every iteration), in this exact order:
 3. Remove `.autopilot/LOCK`.
 4. Write integer to `.autopilot/NEXT_DELAY`.
 5. **Self-reschedule (Claude Code `/loop` dynamic mode only).** If the `ScheduleWakeup` tool is available in this session, you MUST invoke it as a real tool call with `delaySeconds = <NEXT_DELAY>`, `prompt = <the /loop input verbatim, or `<<autonomous-loop-dynamic>>` if autonomous>`, and a one-sentence `reason`. Writing "rescheduled" in prose is NOT execution. Skip this step ONLY if status is `halted` / `halted-auto`, OR the tool is genuinely absent (external runners: Codex, cron, CI). If skipped for tool-absence, record `reschedule: external-runner` on the METRICS line; if skipped for halt, record `reschedule: halted`.
-6. Write current ISO-8601 timestamp to `.autopilot/LAST_RESCHEDULE` as proof-of-reschedule sentinel. Next iteration's boot watchdog reads this to detect a missed Step 5. If Step 5 was skipped for halt, write `halted <ISO>` instead of a bare timestamp so the watchdog can distinguish.
+6. **Proof-of-call sentinel (2 lines, strict format).** Write `.autopilot/LAST_RESCHEDULE` with exactly TWO lines:
+   - Line 1: current ISO-8601 UTC timestamp (e.g. `2026-04-18T22:27:00Z`).
+   - Line 2: the RAW response string from the `ScheduleWakeup` tool call in Step 5 (e.g. `Next wakeup scheduled for 09:08:00 (in 1854s)`). This line MUST come from the tool — fabricating it is a contract violation detectable by the next iter's watchdog.
+   - Halt exception: if Step 5 was skipped for halt, write line 1 as `halted <ISO>` and line 2 as `halt: <reason>`. If skipped for external-runner, write line 2 as `external-runner: <runner-name>`.
 7. Exit with code 0. External runners read NEXT_DELAY and re-submit THIS file verbatim after sleeping; `/loop` dynamic mode relies on the Step 5 tool call.
 
 ## [IMMUTABLE:END exit-contract]
+
+---
+
+## [IMMUTABLE:BEGIN wake-reschedule]
+
+### Wake-reschedule invariants (dual-channel anti-forgery)
+
+These invariants harden exit-contract Steps 5–6 against "said it but didn't tool-call it" silent halts. This block is intentionally OUTSIDE the protect.sh `BLOCKS` list so it remains evolvable as failure modes are discovered, but its current form is load-bearing.
+
+1. **One channel is never enough.** `LAST_RESCHEDULE` existing is not proof the loop was rescheduled. Both must hold: (a) the `ScheduleWakeup` tool call appears in this turn's tool-call log, AND (b) the sentinel's line 2 contains the tool's actual response string. Either alone is insufficient evidence.
+2. **Sentinel format is strict.** Exactly 2 lines. A 1-line sentinel is evidence of narration-only forgery and MUST be treated as a failed reschedule by the watchdog (boot Step 5). The `check-reschedule` operator tool treats 1-line sentinels as exit code 2.
+3. **Prose claims are not execution.** Summary text like "Sentinel written post-ScheduleWakeup" or "NEXT_DELAY=1800; rescheduled." is worthless as proof. Only the tool-call record + 2-line sentinel count.
+4. **Halt is the one legitimate skip.** When status is `halted` / `halted-auto`, Step 5 is skipped by contract and the sentinel uses the `halted <ISO>` / `halt: <reason>` 2-line form. Any other skip is a bug.
+5. **Re-anchor after detected miss.** If boot Step 5 watchdog fires, the current iter SHOULD call `ScheduleWakeup` again at iter end even if exit-contract Step 5 already ran this turn — one legitimate extra call is cheaper than another 10-hour halt.
+
+## [IMMUTABLE:END wake-reschedule]
+
+---
+
+## Exit-path enumeration overlay (mutable — runs with exit-contract)
+
+Checklist form of exit-contract Steps 5–6 for visibility during turn-end scanning. This overlay does NOT add requirements beyond the IMMUTABLE blocks above; it enumerates them so a distracted agent cannot silently skip the tool call. If this overlay contradicts the IMMUTABLE blocks, the IMMUTABLE blocks win.
+
+At exit time, after writing NEXT_DELAY and before `Exit 0`:
+
+- **Step 4a — tool call.** Invoke `ScheduleWakeup(delaySeconds=<NEXT_DELAY>, prompt=<verbatim /loop input or `<<autonomous-loop-dynamic>>`>, reason=<1 sentence>)`. Capture the response string verbatim; you will need it for Step 4b.
+- **Step 4b — sentinel.** Write `.autopilot/LAST_RESCHEDULE` with 2 lines: ISO timestamp, then the raw tool response from 4a. No summarizing, no paraphrasing — literal copy.
+- **Step 4c — self-check.** Before writing Exit 0, mentally confirm: "Did I see `ScheduleWakeup` in my tool-call log this turn, and does `LAST_RESCHEDULE` have 2 lines with line 2 = its response?" If no → go back to 4a. If the tool is genuinely absent (external runner) → 4b uses the `external-runner: <name>` 2-line form and 4a is skipped.
 
 ---
 
@@ -251,7 +282,7 @@ This prompt is a pure text file. The runner supplies:
 - **The AI session.** Claude Code `/loop`, Codex `codex exec --file PROMPT.md`, OpenAI API scheduled, Gemini, local model — anything with tool-use and the ability to read/write files and run shell.
 - **Tools.** Minimum needed: file read/write, shell exec, git. Recommended: web search, web fetch. If web tools are absent, the loop skips the prior-art step in Idle-upkeep and marks `findings.web_search: unavailable`.
 - **Sleep + resubmit.** Between iterations, the runner sleeps `NEXT_DELAY` seconds then re-submits this file verbatim. No conversation memory is required; all continuity is in files.
-- **Self-reschedule in Claude Code `/loop` dynamic mode.** When `ScheduleWakeup` is available as a tool, the agent IS the runner — there is no external sleep loop. Step 5 of the exit-contract MUST execute as an actual tool call; prose like "NEXT_DELAY=1800; rescheduled." is not execution and has caused silent loop halts in the past. The next iteration's boot Step 5 (Reschedule watchdog) detects this by reading `LAST_RESCHEDULE`.
+- **Self-reschedule in Claude Code `/loop` dynamic mode.** When `ScheduleWakeup` is available as a tool, the agent IS the runner — there is no external sleep loop. Exit-contract Steps 5–6 MUST execute as a real tool call PLUS a 2-line `LAST_RESCHEDULE` sentinel whose second line is the tool's raw response. Prose claims like "Sentinel written post-ScheduleWakeup" or "NEXT_DELAY=1800; rescheduled." are not execution. This failure mode has recurred (2026-04-18 iter 0, then iter 6) because narration ≠ tool call; `[IMMUTABLE:wake-reschedule]` and the dual boot-watchdog + `check-reschedule` detector exist to fail-closed.
 - **Secrets.** Via env vars loaded by the runner, not written into any `.autopilot/` file.
 
 See `.autopilot/runners/` for reference implementations: `runner.ps1` (Windows), `runner.sh` (Unix), `github-actions.yml` (CI cron), `cron.example` (crontab).

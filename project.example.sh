@@ -63,28 +63,36 @@ case "$verb" in
 
   check-reschedule)
     # Detect the "said it but didn't tool-call it" ScheduleWakeup failure mode.
-    # Compares LAST_RESCHEDULE timestamp vs now vs NEXT_DELAY. Warns if the
-    # loop should have woken up by now but didn't. Useful as a cron sanity check
-    # or as an operator "is my /loop still alive?" probe.
+    # Three checks (any fails → exit 2):
+    #   1. LAST_RESCHEDULE exists and has 2 lines (1-line = narration-only forgery).
+    #   2. Line 2 (raw tool response) is non-empty and not identical to line 1.
+    #   3. Line 1 timestamp age < NEXT_DELAY + 600s slack.
+    # Exit 0 if loop healthy or halted; exit 2 if overdue/forged; exit 0 if no iter yet.
     ap=".autopilot"
     if [ ! -f "$ap/NEXT_DELAY" ]; then echo "no NEXT_DELAY yet — loop hasn't completed an iteration"; exit 0; fi
     if [ ! -f "$ap/LAST_RESCHEDULE" ]; then echo "WARN: NEXT_DELAY exists but LAST_RESCHEDULE missing — exit-contract step 5/6 likely skipped"; exit 2; fi
-    content=$(cat "$ap/LAST_RESCHEDULE")
-    case "$content" in
-      halted*) echo "halted — no reschedule expected ($content)"; exit 0 ;;
+    line1=$(sed -n '1p' "$ap/LAST_RESCHEDULE")
+    line2=$(sed -n '2p' "$ap/LAST_RESCHEDULE")
+    case "$line1" in
+      halted*|"external-runner:"*) echo "legitimate skip on line 1 — no reschedule expected ($line1)"; exit 0 ;;
     esac
+    if [ -z "$line2" ] || [ "$line2" = "$line1" ]; then
+      echo "WARN: LAST_RESCHEDULE is 1-line or line-2 forged — narration-only sentinel, ScheduleWakeup likely not tool-called"
+      echo "  → per [IMMUTABLE:wake-reschedule] §2, this is a failed reschedule."
+      exit 2
+    fi
     delay=$(cat "$ap/NEXT_DELAY" | tr -cd '0-9')
-    ts_epoch=$(date -d "$content" +%s 2>/dev/null || python3 -c "import sys,datetime;print(int(datetime.datetime.fromisoformat(sys.argv[1].strip().replace('Z','+00:00')).timestamp()))" "$content" 2>/dev/null || echo 0)
+    ts_epoch=$(date -d "$line1" +%s 2>/dev/null || python3 -c "import sys,datetime;print(int(datetime.datetime.fromisoformat(sys.argv[1].strip().replace('Z','+00:00')).timestamp()))" "$line1" 2>/dev/null || echo 0)
     now_epoch=$(date +%s)
     age=$(( now_epoch - ts_epoch ))
     slack=600
-    if [ "$ts_epoch" -eq 0 ]; then echo "WARN: could not parse LAST_RESCHEDULE='$content'"; exit 2; fi
+    if [ "$ts_epoch" -eq 0 ]; then echo "WARN: could not parse LAST_RESCHEDULE line 1='$line1'"; exit 2; fi
     if [ "$age" -gt $(( delay + slack )) ]; then
-      echo "WARN: reschedule overdue — last=$content age=${age}s NEXT_DELAY=${delay}s (slack ${slack}s)"
+      echo "WARN: reschedule overdue — line1=$line1 age=${age}s NEXT_DELAY=${delay}s (slack ${slack}s)"
       echo "  → loop likely stuck. re-anchor with /loop or runner.sh."
       exit 2
     fi
-    echo "ok: last=$content age=${age}s NEXT_DELAY=${delay}s"
+    echo "ok: line1=$line1 line2=$line2 age=${age}s NEXT_DELAY=${delay}s"
     ;;
 
   help|*)
