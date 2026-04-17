@@ -2,6 +2,7 @@
 LOCK
 HALT
 NEXT_DELAY
+LAST_RESCHEDULE
 .audit-cache.*
 
 # METRICS.jsonl: choose one. Default: commit, so self-evolution can read history.

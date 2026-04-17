@@ -31,9 +31,10 @@ You MUST:
    - `.autopilot/STATE.md` (live state: active task, next priorities, build status, blockers, operator overrides)
    - `.autopilot/PITFALLS.md` (append-only landmine registry — every entry is a mistake you already paid for; read it so you don't pay again)
    - `.autopilot/EVOLUTION.md` (current probation status + last 5 self-mods — check if you need to auto-revert)
-5. **Environment self-check (≤60 seconds).** Verify the project-command wrapper works: `bash .autopilot/project.sh doctor` (or `.autopilot\project.ps1 doctor` on Windows). If it fails, write `status: env-broken` to STATE, append to PITFALLS with today's date + concrete "next time: X" line, write `NEXT_DELAY=1800`, exit.
-6. **Probation check.** If EVOLUTION.md shows an active 2-iteration probation from a prior self-mod, compare current metrics against the pre-mod baseline. If any of `avg_duration_s`, `files_read`, `bash_calls` regressed >20%, auto-revert the evolution commit, append the revert reason to EVOLUTION.md, and proceed with the non-evolved prompt.
-7. **Decide mode** (exactly one):
+5. **Reschedule watchdog.** Read `.autopilot/LAST_RESCHEDULE` and `.autopilot/NEXT_DELAY` from the previous iteration. If `METRICS.jsonl` has ≥1 prior iteration AND (LAST_RESCHEDULE is missing, OR LAST_RESCHEDULE is not the literal `halted <ISO>` marker AND its timestamp is older than `(previous NEXT_DELAY + 600)` seconds from now), append ONE line to `FINDINGS.md` with `severity: high`, date, and concrete text: `suspected missed self-reschedule at iter N-1 exit-contract step 5 — ScheduleWakeup likely not tool-called. proposed-action: verify /loop mode, re-anchor with a fresh ScheduleWakeup this turn.` Do not halt. Continue boot.
+6. **Environment self-check (≤60 seconds).** Verify the project-command wrapper works: `bash .autopilot/project.sh doctor` (or `.autopilot\project.ps1 doctor` on Windows). If it fails, write `status: env-broken` to STATE, append to PITFALLS with today's date + concrete "next time: X" line, write `NEXT_DELAY=1800`, run the exit-contract (including Step 5 self-reschedule), exit.
+7. **Probation check.** If EVOLUTION.md shows an active 2-iteration probation from a prior self-mod, compare current metrics against the pre-mod baseline. If any of `avg_duration_s`, `files_read`, `bash_calls` regressed >20%, auto-revert the evolution commit, append the revert reason to EVOLUTION.md, and proceed with the non-evolved prompt.
+8. **Decide mode** (exactly one):
    - If STATE has `active_task:` set and unfinished → **Active mode**.
    - Else if BACKLOG.md has any `[P1]` or unticked top-priority item → promote it to `active_task:`, enter **Active mode**.
    - Else if `.autopilot/FINDINGS.md` has entries older than 1 iteration with `severity: high` → promote, enter **Active mode**.
@@ -233,7 +234,9 @@ Before exit (every iteration), in this exact order:
 2. Append ONE line to `.autopilot/METRICS.jsonl`: `{"iter":N,"ts":"<ISO>","mode":"active|upkeep|brainstorm|evolution|halted","status":"...","duration_s":N,"files_read":N,"bash_calls":N,"commits":N,"prs":N,"budget_exceeded":null|"..."}` — one line, valid JSON, no trailing comma.
 3. Remove `.autopilot/LOCK`.
 4. Write integer to `.autopilot/NEXT_DELAY`.
-5. Exit with code 0. The runner reads NEXT_DELAY and re-submits THIS file verbatim after sleeping.
+5. **Self-reschedule (Claude Code `/loop` dynamic mode only).** If the `ScheduleWakeup` tool is available in this session, you MUST invoke it as a real tool call with `delaySeconds = <NEXT_DELAY>`, `prompt = <the /loop input verbatim, or `<<autonomous-loop-dynamic>>` if autonomous>`, and a one-sentence `reason`. Writing "rescheduled" in prose is NOT execution. Skip this step ONLY if status is `halted` / `halted-auto`, OR the tool is genuinely absent (external runners: Codex, cron, CI). If skipped for tool-absence, record `reschedule: external-runner` on the METRICS line; if skipped for halt, record `reschedule: halted`.
+6. Write current ISO-8601 timestamp to `.autopilot/LAST_RESCHEDULE` as proof-of-reschedule sentinel. Next iteration's boot watchdog reads this to detect a missed Step 5. If Step 5 was skipped for halt, write `halted <ISO>` instead of a bare timestamp so the watchdog can distinguish.
+7. Exit with code 0. External runners read NEXT_DELAY and re-submit THIS file verbatim after sleeping; `/loop` dynamic mode relies on the Step 5 tool call.
 
 ## [IMMUTABLE:END exit-contract]
 
@@ -246,6 +249,7 @@ This prompt is a pure text file. The runner supplies:
 - **The AI session.** Claude Code `/loop`, Codex `codex exec --file PROMPT.md`, OpenAI API scheduled, Gemini, local model — anything with tool-use and the ability to read/write files and run shell.
 - **Tools.** Minimum needed: file read/write, shell exec, git. Recommended: web search, web fetch. If web tools are absent, the loop skips the prior-art step in Idle-upkeep and marks `findings.web_search: unavailable`.
 - **Sleep + resubmit.** Between iterations, the runner sleeps `NEXT_DELAY` seconds then re-submits this file verbatim. No conversation memory is required; all continuity is in files.
+- **Self-reschedule in Claude Code `/loop` dynamic mode.** When `ScheduleWakeup` is available as a tool, the agent IS the runner — there is no external sleep loop. Step 5 of the exit-contract MUST execute as an actual tool call; prose like "NEXT_DELAY=1800; rescheduled." is not execution and has caused silent loop halts in the past. The next iteration's boot Step 5 (Reschedule watchdog) detects this by reading `LAST_RESCHEDULE`.
 - **Secrets.** Via env vars loaded by the runner, not written into any `.autopilot/` file.
 
 See `.autopilot/runners/` for reference implementations: `runner.ps1` (Windows), `runner.sh` (Unix), `github-actions.yml` (CI cron), `cron.example` (crontab).

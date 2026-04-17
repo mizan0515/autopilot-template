@@ -45,6 +45,28 @@ switch ($Verb) {
     Write-Host 'HALT removed. Loop may resume on next runner wake-up.'
   }
 
+  'check-reschedule' {
+    # Detect "said it but didn't tool-call it" ScheduleWakeup failures.
+    # Compares LAST_RESCHEDULE vs now vs NEXT_DELAY. Exits 2 if overdue.
+    $ap = '.autopilot'
+    $nd = Join-Path $ap 'NEXT_DELAY'
+    $lr = Join-Path $ap 'LAST_RESCHEDULE'
+    if (-not (Test-Path $nd)) { Write-Host "no NEXT_DELAY yet — loop hasn't completed an iteration"; exit 0 }
+    if (-not (Test-Path $lr)) { Write-Warning 'NEXT_DELAY exists but LAST_RESCHEDULE missing — exit-contract step 5/6 likely skipped'; exit 2 }
+    $content = (Get-Content $lr -Raw).Trim()
+    if ($content -like 'halted*') { Write-Host "halted — no reschedule expected ($content)"; exit 0 }
+    $delay = [int]((Get-Content $nd -Raw).Trim())
+    try { $ts = [DateTimeOffset]::Parse($content) } catch { Write-Warning "could not parse LAST_RESCHEDULE='$content'"; exit 2 }
+    $age = [int]((Get-Date) - $ts.UtcDateTime).TotalSeconds
+    $slack = 600
+    if ($age -gt ($delay + $slack)) {
+      Write-Warning "reschedule overdue — last=$content age=${age}s NEXT_DELAY=${delay}s (slack ${slack}s)"
+      Write-Host '  -> loop likely stuck. re-anchor with /loop or runner.ps1.'
+      exit 2
+    }
+    Write-Host "ok: last=$content age=${age}s NEXT_DELAY=${delay}s"
+  }
+
   default {
     @'
 project.ps1 — autopilot project wrapper
@@ -56,6 +78,7 @@ Verbs:
   start    Start the loop via runner.ps1.
   stop     Create .autopilot\HALT (polite stop).
   resume   Remove .autopilot\HALT.
+  check-reschedule  Verify LAST_RESCHEDULE is fresh vs NEXT_DELAY. Exit 2 if overdue.
 '@
   }
 }

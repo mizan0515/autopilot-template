@@ -61,6 +61,32 @@ case "$verb" in
     echo "HALT removed. Loop may resume on next runner wake-up."
     ;;
 
+  check-reschedule)
+    # Detect the "said it but didn't tool-call it" ScheduleWakeup failure mode.
+    # Compares LAST_RESCHEDULE timestamp vs now vs NEXT_DELAY. Warns if the
+    # loop should have woken up by now but didn't. Useful as a cron sanity check
+    # or as an operator "is my /loop still alive?" probe.
+    ap=".autopilot"
+    if [ ! -f "$ap/NEXT_DELAY" ]; then echo "no NEXT_DELAY yet — loop hasn't completed an iteration"; exit 0; fi
+    if [ ! -f "$ap/LAST_RESCHEDULE" ]; then echo "WARN: NEXT_DELAY exists but LAST_RESCHEDULE missing — exit-contract step 5/6 likely skipped"; exit 2; fi
+    content=$(cat "$ap/LAST_RESCHEDULE")
+    case "$content" in
+      halted*) echo "halted — no reschedule expected ($content)"; exit 0 ;;
+    esac
+    delay=$(cat "$ap/NEXT_DELAY" | tr -cd '0-9')
+    ts_epoch=$(date -d "$content" +%s 2>/dev/null || python3 -c "import sys,datetime;print(int(datetime.datetime.fromisoformat(sys.argv[1].strip().replace('Z','+00:00')).timestamp()))" "$content" 2>/dev/null || echo 0)
+    now_epoch=$(date +%s)
+    age=$(( now_epoch - ts_epoch ))
+    slack=600
+    if [ "$ts_epoch" -eq 0 ]; then echo "WARN: could not parse LAST_RESCHEDULE='$content'"; exit 2; fi
+    if [ "$age" -gt $(( delay + slack )) ]; then
+      echo "WARN: reschedule overdue — last=$content age=${age}s NEXT_DELAY=${delay}s (slack ${slack}s)"
+      echo "  → loop likely stuck. re-anchor with /loop or runner.sh."
+      exit 2
+    fi
+    echo "ok: last=$content age=${age}s NEXT_DELAY=${delay}s"
+    ;;
+
   help|*)
     cat <<EOF
 project.sh — autopilot project wrapper
@@ -72,6 +98,7 @@ Verbs:
   start    Start the loop via the PowerShell/bash runner.
   stop     Create .autopilot/HALT (polite stop).
   resume   Remove .autopilot/HALT.
+  check-reschedule  Verify LAST_RESCHEDULE is fresh vs NEXT_DELAY. Exit 2 if overdue.
 EOF
     ;;
 esac
