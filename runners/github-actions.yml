@@ -1,0 +1,57 @@
+# .github/workflows/autopilot.yml — run one iteration per cron tick.
+# Copy into .github/workflows/ of the target project. NEXT_DELAY is ignored in
+# CI mode; cadence is controlled by the cron schedule. The loop still writes
+# NEXT_DELAY for local runners, which is harmless here.
+
+name: autopilot
+
+on:
+  schedule:
+    - cron: '*/20 * * * *'     # every 20 min; tune to your cost budget
+  workflow_dispatch:            # manual single-shot
+
+concurrency:
+  group: autopilot              # at most one running at a time
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45         # hard cap below the 90-min per-iter budget
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+
+      - name: Respect HALT file
+        run: |
+          if [ -f .autopilot/HALT ]; then
+            echo "::notice::HALT present; skipping iteration."
+            exit 0
+          fi
+
+      - name: Install AI CLI
+        run: |
+          # Pick one. Example with Claude Code CLI:
+          npm i -g @anthropic-ai/claude-code
+          # Or for Codex:
+          # curl -sSL https://... | sh
+
+      - name: Run one iteration
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          AUTOPILOT_AI: claude
+        run: |
+          # Single shot; CI handles the "sleep + resubmit" via cron above.
+          cat .autopilot/PROMPT.md | claude --print
+
+      - name: Commit state updates (if any)
+        run: |
+          git config user.name  "autopilot-bot"
+          git config user.email "autopilot@users.noreply.github.com"
+          git add .autopilot/ || true
+          git diff --cached --quiet || git commit -m "autopilot: state update $(date -Iseconds)"
+          git push || true

@@ -1,0 +1,15 @@
+# Linux crontab — run one autopilot iteration every 20 minutes.
+# Install:   crontab -e   then paste one of the lines below.
+# NEXT_DELAY from the prompt is IGNORED in cron mode; cadence is the cron interval.
+
+# Minimal (one-shot per tick, Claude Code CLI):
+*/20 * * * * cd /path/to/repo && AUTOPILOT_AI=claude bash -lc 'cat .autopilot/PROMPT.md | claude --print' >> /tmp/autopilot.log 2>&1
+
+# Codex variant:
+# */20 * * * * cd /path/to/repo && codex exec --file .autopilot/PROMPT.md >> /tmp/autopilot.log 2>&1
+
+# Custom CLI via AUTOPILOT_CMD:
+# */20 * * * * cd /path/to/repo && AUTOPILOT_AI=custom AUTOPILOT_CMD='my-llm -p @.autopilot/PROMPT.md' bash .autopilot/runners/runner.sh
+
+# Guard against stuck previous runs — skip if LOCK is <90 min old:
+# */20 * * * * cd /path/to/repo && [ -f .autopilot/LOCK ] && [ $(($(date +%s) - $(stat -c %Y .autopilot/LOCK))) -lt 5400 ] || (cat .autopilot/PROMPT.md | claude --print)

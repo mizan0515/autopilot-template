@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-16"?>
+<!--
+  Windows Task Scheduler definition for autopilot (one iteration every 20 minutes).
+  Import:   schtasks /Create /XML task-scheduler.xml /TN "Autopilot"
+  Unimport: schtasks /Delete /TN "Autopilot" /F
+  Adjust <WorkingDirectory> and <Arguments> to your repo path before importing.
+-->
+<Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <Triggers>
+    <TimeTrigger>
+      <Repetition>
+        <Interval>PT20M</Interval>
+        <StopAtDurationEnd>false</StopAtDurationEnd>
+      </Repetition>
+      <StartBoundary>2026-01-01T00:00:00</StartBoundary>
+      <Enabled>true</Enabled>
+    </TimeTrigger>
+  </Triggers>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <ExecutionTimeLimit>PT45M</ExecutionTimeLimit>
+    <AllowHardTerminate>true</AllowHardTerminate>
+    <StartWhenAvailable>true</StartWhenAvailable>
+  </Settings>
+  <Actions>
+    <Exec>
+      <Command>powershell.exe</Command>
+      <Arguments>-NoProfile -ExecutionPolicy Bypass -File "C:\path\to\repo\.autopilot\runners\runner.ps1"</Arguments>
+      <WorkingDirectory>C:\path\to\repo</WorkingDirectory>
+    </Exec>
+  </Actions>
+</Task>

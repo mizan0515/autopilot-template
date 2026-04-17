@@ -1,0 +1,9 @@
+# Runtime-only files inside .autopilot/ — don't commit
+LOCK
+HALT
+NEXT_DELAY
+.audit-cache.*
+
+# METRICS.jsonl: choose one. Default: commit, so self-evolution can read history.
+# Uncomment if you prefer to gitignore it:
+# METRICS.jsonl
