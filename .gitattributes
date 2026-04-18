@@ -1,0 +1,7 @@
+# Windows batch files (.cmd/.bat) here use CP949 (Korean ANSI) + CRLF so that
+# Korean Windows cmd.exe can parse the Korean script filenames correctly.
+# Treat them as binary so git never touches the bytes — no autocrlf conversion,
+# no encoding normalization. If you edit these files, save them in ANSI/CP949
+# with CRLF endings (Notepad "ANSI" encoding on Korean Windows is CP949).
+*.cmd   binary
+*.bat   binary
