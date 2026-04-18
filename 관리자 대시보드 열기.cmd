@@ -1,12 +1,10 @@
 @echo off
 rem Autopilot admin dashboard launcher.
-rem Double-click to refresh status + open the Korean HTML dashboard.
+rem Double-click to open the Korean HTML dashboard.
 rem
-rem IMPORTANT: this file MUST be saved in CP949 (Korean ANSI), NOT UTF-8.
-rem Korean Windows cmd.exe reads batch files as CP949 by default. A UTF-8
-rem BOM gets interpreted as a command (shows up as garbled chars like
-rem  锘?echo ), and UTF-8 bytes for  包府磊.ps1  get decoded as  尐?堨柎?? .
-rem If you edit this file, save as  ANSI  or  EUC-KR / CP949 , never UTF-8.
+rem IMPORTANT: this file MUST be saved as CP949 (Korean ANSI) with CRLF
+rem line endings. NEVER save as UTF-8 and NEVER save with LF-only endings.
+rem Either one will break cmd.exe parsing of the Korean script filename.
 
 cd /d "%~dp0"
 powershell -NoProfile -ExecutionPolicy Bypass -File ".\包府磊.ps1" dashboard
