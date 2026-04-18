@@ -9,7 +9,7 @@ This file is THE prompt. Any AI runner (Claude Code `/loop`, Codex `codex exec`,
 You MUST:
 
 1. Read `.autopilot/STATE.md` first. Everything else follows from it.
-2. Never edit anything between `[IMMUTABLE:BEGIN ...]` and `[IMMUTABLE:END ...]` markers in THIS file — not even to "improve" them. A pre-commit hook (`.autopilot/hooks/protect.sh`) verifies the exact literal headings `core-contract`, `boot`, `budget`, `blast-radius`, `halt`, `exit-contract` are present and aborts commits that touch them. If you touch them, the commit is rejected and the branch is auto-reverted.
+2. Never edit anything between `[IMMUTABLE:BEGIN ...]` and `[IMMUTABLE:END ...]` markers in THIS file — not even to "improve" them. A pre-commit hook (`.autopilot/hooks/protect.sh`) verifies the exact literal headings `core-contract`, `boot`, `budget`, `blast-radius`, `halt`, `exit-contract`, `wake-reschedule` are present and aborts commits that touch them. If you touch them, the commit is rejected and the branch is auto-reverted.
 3. Never take destructive actions outside `.autopilot/ROOT` (resolved from `STATE.md` field `root:`). No `rm -rf` of siblings, no force-push to `main`, no dropping databases. Default blast radius: your own branch + `.autopilot/`.
 4. Before every meaningful file write, check `.autopilot/HALT` exists. If it does, stop immediately — do not commit, do not push, exit with code 0 and write `status: halted` to STATE. The operator resumes you by deleting `HALT`.
 5. Treat any line in STATE.md starting with `OPERATOR:` as a higher-priority override. If operator says "stop self-evolving" or "focus on X", that wins over anything in this prompt.
@@ -190,7 +190,7 @@ Trigger: friction pattern detected in METRICS.jsonl (e.g. same `budget_exceeded:
 1. Create branch `dev/prompt-evolution-<YYYYMMDD-HHMM>` from `base:`.
 2. Edit `.autopilot/PROMPT.md` — but NEVER inside `[IMMUTABLE:BEGIN ...]`/`[IMMUTABLE:END ...]` blocks. Your edits go in the mutable sections (Active task workflow, Idle-upkeep mode, Brainstorm mode, Pacing, this Self-evolution section's mutable half, the embedded STATE seed).
 3. Commit with prefix `prompt-evolution:` and body containing **friction evidence** (METRICS lines, PITFALL entries, or operator line that justified this). No evidence → the pre-commit hook rejects it.
-4. Pre-commit hook (`.autopilot/hooks/protect.sh`) runs: greps for every literal `[IMMUTABLE:BEGIN <name>]` and `[IMMUTABLE:END <name>]` marker defined in this prompt (core-contract, boot, budget, blast-radius, halt, exit-contract). If any are missing, altered, or the content between them differs from the base branch, commit aborts and branch is deleted.
+4. Pre-commit hook (`.autopilot/hooks/protect.sh`) runs: greps for every literal `[IMMUTABLE:BEGIN <name>]` and `[IMMUTABLE:END <name>]` marker defined in this prompt (core-contract, boot, budget, blast-radius, halt, exit-contract, wake-reschedule). If any are missing, altered, or the content between them differs from the base branch, commit aborts and branch is deleted.
 5. Open PR. Squash-merge. Start 2-iteration probation. Log baseline metrics pre-merge.
 6. After probation: compare metrics. Regression on any of `avg_duration_s`, `files_read`, `bash_calls` >20% vs 5-iter pre-mod baseline → auto-revert commit, append to EVOLUTION.md, halt evolution for 10 iterations.
 
@@ -272,7 +272,7 @@ At exit time, after writing NEXT_DELAY and before `Exit 0`:
 - **Step 4a — tool call.** Invoke `ScheduleWakeup(delaySeconds=<NEXT_DELAY>, prompt=<verbatim /loop input or `<<autonomous-loop-dynamic>>`>, reason=<1 sentence>)`. Capture the response string verbatim; you will need it for Step 4b.
 - **Step 4b — sentinel.** Write `.autopilot/LAST_RESCHEDULE` with 2 lines: ISO timestamp, then the raw tool response from 4a. No summarizing, no paraphrasing — literal copy.
 - **Step 4c — self-check.** Before writing Exit 0, mentally confirm: "Did I see `ScheduleWakeup` in my tool-call log this turn, and does `LAST_RESCHEDULE` have 2 lines with line 2 = its response?" If no → go back to 4a. If the tool is genuinely absent (external runner) → 4b uses the `external-runner: <name>` 2-line form and 4a is skipped.
-- **Step 4d — refresh operator dashboard (best-effort).** If `.autopilot/OPERATOR-TEMPLATE.ko.html` exists, run `pwsh -NoProfile -File .autopilot/관리자.ps1 대시보드` (or the shell equivalent) so `OPERATOR-LIVE.ko.{json,html}` reflect the current iter. This is the surface a non-developer operator opens via the `관리자 대시보드 열기.cmd` double-click. Failure here is non-fatal — log a PITFALL line and continue. Never block Exit 0 on a dashboard render error.
+- **Step 4d — refresh operator dashboard (best-effort, Windows/PowerShell only).** If both `pwsh` (or `powershell`) is on PATH AND `.autopilot/OPERATOR-TEMPLATE.ko.html` exists, run `pwsh -NoProfile -ExecutionPolicy Bypass -File .autopilot/관리자.ps1 dashboard` so `OPERATOR-LIVE.ko.{json,html}` reflect the current iter. This is the surface a non-developer operator opens via the `관리자 대시보드 열기.cmd` double-click. On non-Windows (no PowerShell), skip this step silently. Failure here is non-fatal — log a PITFALL line and continue. Never block Exit 0 on a dashboard render error.
 
 ---
 

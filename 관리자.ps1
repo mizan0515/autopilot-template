@@ -55,7 +55,7 @@ function 상태읽기 {
     Write-Host '   → 클로드 코드 채팅에 다시 입력하세요:  /loop .autopilot/PROMPT.md'
     줄; return
   }
-  $lines = @(Get-Content $lr)
+  $lines = @(Get-Content -Encoding UTF8 $lr)
   $line1 = if ($lines.Count -ge 1) { $lines[0].Trim() } else { '' }
   $line2 = if ($lines.Count -ge 2) { $lines[1].Trim() } else { '' }
 
@@ -69,7 +69,7 @@ function 상태읽기 {
     줄; return
   }
 
-  $delay = [int]((Get-Content $nd -Raw).Trim())
+  $delay = [int]((Get-Content -Encoding UTF8 $nd -Raw).Trim())
   try { $ts = [DateTimeOffset]::Parse($line1) }
   catch {
     Write-Host "⚠️  타임스탬프 해석 실패: $line1" -ForegroundColor Yellow
@@ -94,7 +94,7 @@ function 상태읽기 {
   if (Test-Path $hist) {
     줄
     Write-Host '📜 최근 작업 (HISTORY.md 끝 부분):' -ForegroundColor Cyan
-    Get-Content $hist -Tail 12 | ForEach-Object { Write-Host "   $_" }
+    Get-Content -Encoding UTF8 $hist -Tail 12 | ForEach-Object { Write-Host "   $_" }
   }
   줄
 }
@@ -208,7 +208,7 @@ function 대시보드데이터수집 {
   $operatorLines = @()
   $openQuestions = @()
   if (Test-Path $sp) {
-    $stateContent = Get-Content $sp
+    $stateContent = Get-Content -Encoding UTF8 $sp
     foreach ($line in $stateContent) {
       if ($line -match '^status:\s*(.+)$' -and -not $halted) {
         $data.status = $Matches[1].Trim()
@@ -254,7 +254,7 @@ function 대시보드데이터수집 {
       $data.wake_summary     = '증거 파일 없음'
       $data.wake_hint        = 'LAST_RESCHEDULE 파일이 없습니다.'
     } else {
-      $lines = @(Get-Content $lr)
+      $lines = @(Get-Content -Encoding UTF8 $lr)
       $line1 = if ($lines.Count -ge 1) { $lines[0].Trim() } else { '' }
       $line2 = if ($lines.Count -ge 2) { $lines[1].Trim() } else { '' }
       if ($line1 -like 'halted*' -or $line1 -like 'external-runner:*') {
@@ -269,7 +269,7 @@ function 대시보드데이터수집 {
       } else {
         try {
           $ts = [DateTimeOffset]::Parse($line1)
-          $delayRaw = (Get-Content $nd -Raw).Trim()
+          $delayRaw = (Get-Content -Encoding UTF8 $nd -Raw).Trim()
           $delay = if ($delayRaw -match '^\d+$') { [int]$delayRaw } else { 900 }
           $age = [int]((Get-Date) - $ts.UtcDateTime).TotalSeconds
           $slack = 600
@@ -304,7 +304,7 @@ function 대시보드데이터수집 {
   $goals = @()
   if (Test-Path $mvp) {
     # MVP 게이트가 있으면 우선 — 체크 안 된 것만
-    foreach ($line in Get-Content $mvp) {
+    foreach ($line in Get-Content -Encoding UTF8 $mvp) {
       if ($line -match '^\s*-\s*\[\s\]\s*(.+)$') {
         $goals += ($Matches[1].Trim() -replace '\s*\(.+?\)\s*$','').Substring(0, [math]::Min(80, ($Matches[1].Trim()).Length))
         if ($goals.Count -ge 5) { break }
@@ -312,7 +312,7 @@ function 대시보드데이터수집 {
     }
   }
   if ($goals.Count -eq 0 -and (Test-Path $bp)) {
-    foreach ($line in Get-Content $bp) {
+    foreach ($line in Get-Content -Encoding UTF8 $bp) {
       if ($line -match '^\s*[-*]\s*\[P1\]\s*(.+)$') {
         $t = $Matches[1].Trim()
         if ($t.Length -gt 100) { $t = $t.Substring(0, 100) + '…' }
@@ -362,7 +362,7 @@ function 대시보드데이터수집 {
   # ── HISTORY 마지막 12줄 ──────────────────────────────
   $hist = Join-Path $ap 'HISTORY.md'
   if (Test-Path $hist) {
-    $data.history_lines = [string[]](@(Get-Content $hist -Tail 12) | ForEach-Object { [string]$_ })
+    $data.history_lines = [string[]](@(Get-Content -Encoding UTF8 $hist -Tail 12) | ForEach-Object { [string]$_ })
   }
 
   return $data
@@ -381,13 +381,19 @@ function 대시보드 {
   $json = $json -replace '</', '<\/'
 
   # 단순 문자열 치환 (Regex 아님 — JSON 안의 특수문자가 regex로 해석되지 않게)
-  $template = Get-Content -Raw $tpl
+  # 주의: Windows PowerShell 5의 Get-Content 기본 인코딩은 시스템 ANSI(한국어 Windows = CP949).
+  # UTF-8 HTML을 CP949로 읽으면 한글이 모지바케되어 브라우저가 </title> 경계를 못 찾습니다.
+  # [IO.File]::ReadAllText를 UTF-8로 명시해서 PS5/PS7 모두 안전하게 동작시킵니다.
+  $template = [System.IO.File]::ReadAllText($tpl, [System.Text.UTF8Encoding]::new($false))
   $html = $template.Replace('{{JSON_DATA}}', $json)
 
   $jsonOut = Join-Path $ap 'OPERATOR-LIVE.ko.json'
   $htmlOut = Join-Path $ap 'OPERATOR-LIVE.ko.html'
-  $data | ConvertTo-Json -Depth 5 | Out-File -Encoding UTF8 $jsonOut
-  $html | Out-File -Encoding UTF8 $htmlOut
+  # Out-File -Encoding UTF8은 PS5에서 BOM을 붙입니다. WriteAllText로 UTF-8 no-BOM으로 저장.
+  $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+  $jsonFull = $data | ConvertTo-Json -Depth 5
+  [System.IO.File]::WriteAllText($jsonOut, $jsonFull, $utf8NoBom)
+  [System.IO.File]::WriteAllText($htmlOut, $html, $utf8NoBom)
 
   Write-Host "✅ 대시보드 갱신 완료: $htmlOut" -ForegroundColor Green
   Start-Process $htmlOut

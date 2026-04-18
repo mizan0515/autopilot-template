@@ -6,7 +6,7 @@
 #
 # Rejects any commit that touches PROMPT.md AND alters content between
 # [IMMUTABLE:BEGIN <name>] ... [IMMUTABLE:END <name>] markers, for any of the
-# six named protected blocks. Also rejects if any marker is removed.
+# seven named protected blocks. Also rejects if any marker is removed.
 
 set -euo pipefail
 
@@ -22,7 +22,7 @@ if ! git rev-parse --verify HEAD >/dev/null 2>&1; then
   exit 0
 fi
 
-BLOCKS=(core-contract boot budget blast-radius halt exit-contract)
+BLOCKS=(core-contract boot budget blast-radius halt exit-contract wake-reschedule)
 
 tmp_base=$(mktemp); tmp_head=$(mktemp)
 trap 'rm -f "$tmp_base" "$tmp_head"' EXIT
