@@ -9,7 +9,7 @@ if ($staged -notcontains $prompt) { exit 0 }
 
 try { git rev-parse --verify HEAD | Out-Null } catch { exit 0 }
 
-$blocks = 'core-contract','boot','budget','blast-radius','halt','exit-contract'
+$blocks = 'core-contract','boot','budget','blast-radius','halt','exit-contract','wake-reschedule','decision-pr-invariants'
 
 $baseText = git show "HEAD:$prompt"
 $headText = git show ":$prompt"

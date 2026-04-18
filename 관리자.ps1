@@ -191,15 +191,45 @@ function 대시보드데이터수집 {
 
   $halted = Test-Path (Join-Path $ap 'HALT')
 
+  # ── decision_pr/decision_slug 미리 읽기 (Hero 카드에서 사용) ──
+  $decisionPR   = $null
+  $decisionSlug = $null
+  $spEarly = Join-Path $ap 'STATE.md'
+  if (Test-Path $spEarly) {
+    foreach ($line in (Get-Content -Encoding UTF8 $spEarly)) {
+      if ($line -match '^decision_pr:\s*(\S+)')   { $decisionPR   = $Matches[1].Trim() }
+      if ($line -match '^decision_slug:\s*(\S+)') { $decisionSlug = $Matches[1].Trim() }
+    }
+    if ($decisionPR -eq 'null')   { $decisionPR   = $null }
+    if ($decisionSlug -eq 'null') { $decisionSlug = $null }
+  }
+
   # ── HALT 우선 판정 ────────────────────────────────────
   if ($halted) {
-    $data.hero_class       = 'halted'
-    $data.action_title     = '⛔ 정지된 상태입니다. 재개하려면 직접 켜셔야 합니다.'
-    $data.action_body_html = 'PowerShell에서 <code>.\.autopilot\관리자.ps1 재개</code> 를 실행한 뒤, 클로드 코드 채팅에 <code>/loop .autopilot/PROMPT.md</code> 를 입력하세요.'
-    $data.status           = '정지됨 (HALT)'
-    $data.health_class     = 'halted'
-    $data.health_title     = '⛔ 지금은 멈춰 있습니다'
-    $data.health_detail    = '누군가 정지 버튼을 눌렀어요. 재개하면 정상 동작합니다.'
+    # HALT 내용을 확인해 "결정 PR 대기" 상태인지(레거시), 아니면 진짜 비상정지인지 구분.
+    $haltBody = try { (Get-Content -Encoding UTF8 -Raw (Join-Path $ap 'HALT')).Trim() } catch { '' }
+    $data.status       = '정지됨 (HALT)'
+    $data.hero_class   = 'halted'
+    $data.health_class = 'halted'
+    $data.health_title = '⛔ 지금은 멈춰 있습니다'
+    if ($haltBody -match 'pending-decision|awaiting|decision' -or $haltBody -match 'operator-direction|post-mvp') {
+      # 레거시 흐름: 구 버전 루프가 HALT 를 판단용으로 썼던 경우 — 결정 PR 로 안내.
+      $data.action_title     = '🙋 결정 PR 머지만 해주시면 재개됩니다'
+      $data.action_body_html = '루프가 판단을 기다리고 있어요. GitHub 에서 <b>"🙋 결정 필요"</b> 제목의 PR 을 찾아 원하는 옵션을 고른 뒤 <b>머지</b> 만 누르세요. 파일을 직접 수정할 필요는 없습니다.'
+      $data.health_detail    = '결정 PR 머지로 자동 재개됩니다.'
+    } else {
+      # 진짜 비상정지 — 대시보드 버튼으로 재개 (파일 삭제를 스크립트가 대신함).
+      $data.action_title     = '⛔ 비상정지 상태입니다'
+      $data.action_body_html = '재개하려면 PowerShell에서 <code>.\.autopilot\관리자.ps1 재개</code> 를 한 번 실행해 주세요. 그 외에는 어떤 파일도 직접 만질 필요가 없습니다.'
+      $data.health_detail    = '정지 버튼이 눌려있어요. 재개 명령 한 줄이면 됩니다.'
+    }
+  }
+
+  # ── awaiting-decision 상태 (HALT 아님) ───────────────
+  if (-not $halted -and $decisionPR) {
+    $data.hero_class       = 'review'
+    $data.action_title     = '🙋 결정 PR 머지만 해주시면 됩니다'
+    $data.action_body_html = "루프가 판단을 기다리고 있어요. <a href='$decisionPR' target='_blank' style='color:#fbbf24'>$decisionPR</a> 을(를) 열어 옵션을 고른 뒤 <b>머지</b> 만 누르세요."
   }
 
   # ── STATE.md 파싱 ────────────────────────────────────
@@ -324,14 +354,45 @@ function 대시보드데이터수집 {
   $data.big_goals = [string[]]$goals
 
   # ── 관리자 확인 필요 목록 ────────────────────────────
+  # 새 규칙: 관리자 승인은 전부 "🙋 결정 필요" 한국어 PR로만 수렴됩니다.
+  # 여기서는 (1) OPERATOR-DECISIONS.md 의 pending 블록, (2) STATE 의 decision_pr 필드,
+  # (3) gh 가 있다면 operator-decision 라벨이 붙은 열린 PR을 모읍니다.
   $approvals = @()
+  $decFile = Join-Path $ap 'OPERATOR-DECISIONS.md'
+  $pendingDecisions = @()
+  if (Test-Path $decFile) {
+    $curSlug = $null; $curStatus = $null; $curQ = $null
+    foreach ($line in (Get-Content -Encoding UTF8 $decFile)) {
+      if ($line -match '^##\s*(\S+).*status:\s*(pending|resolved)') {
+        if ($curSlug -and $curStatus -eq 'pending') {
+          $pendingDecisions += [ordered]@{ slug = $curSlug; q = $curQ }
+        }
+        $curSlug = $Matches[1]; $curStatus = $Matches[2]; $curQ = $null
+      } elseif ($line -match '^\*\*질문:\*\*\s*(.+)$' -and -not $curQ) {
+        $curQ = $Matches[1].Trim()
+      }
+    }
+    if ($curSlug -and $curStatus -eq 'pending') {
+      $pendingDecisions += [ordered]@{ slug = $curSlug; q = $curQ }
+    }
+  }
+
+  foreach ($d in $pendingDecisions) {
+    $q = if ($d.q) { $d.q } else { '(질문 미기재)' }
+    $label = "🙋 결정 PR 머지 대기: $q"
+    if ($decisionPR -and $d.slug -eq $decisionSlug) {
+      $label += "  →  $decisionPR"
+    }
+    $approvals += $label
+  }
+
   if ($operatorReviewRequired) {
-    $approvals += 'STATE.md에 "require human review" 옵션이 켜져있어요. 열린 PR을 직접 확인·머지해 주세요.'
+    # 레거시 — 새로운 프로젝트에서는 결정 PR 로 대체되었지만 읽기는 유지.
+    $approvals += '(레거시) STATE.md 의 "require human review" 플래그가 감지됨. 다음 결정 PR에 인계됩니다.'
   }
   foreach ($q in $openQuestions) {
-    if ($q) { $approvals += "열린 질문: $q" }
+    if ($q) { $approvals += "열린 질문: $q (자동으로 다음 결정 PR에 반영됩니다)" }
   }
-  # 활성 PR 중 [review-needed] 라벨이 있는지 체크는 gh 호출이라 대시보드에서는 스킵
   $data.needs_approval = [string[]]$approvals
 
   # ── 건강 신호 5종 산출 (HALT 우선 이미 세팅됨) ──────

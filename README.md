@@ -20,8 +20,11 @@ A **runner-agnostic, AI-agnostic, single-prompt, infinitely self-improving** dev
 | 화면에 뜨는 것 | 해야 할 일 |
 |---|---|
 | ✅ **없습니다. 지금은 기다리면 됩니다.** | 아무것도 안 하셔도 됩니다. 알아서 돕니다. |
+| 🙋 **결정 PR 머지만 해주시면 됩니다** | GitHub 에서 `🙋 결정 필요: ...` PR 을 열어 **머지** 버튼만 누르세요. 옵션 바꾸려면 `[ ]` → `[x]` 후 머지. 파일 수정 금지. |
 | 🚨 **멈췄습니다 / 증거가 부실합니다** | 클로드 코드 채팅에 `/loop .autopilot/PROMPT.md` 한 줄 다시 입력. |
-| ⛔ **정지된 상태입니다** | 아래 "재개" 절차 참고. |
+| ⛔ **비상정지 상태입니다** | 아래 "재개" 절차 참고. |
+
+> **관리자가 파일을 직접 편집할 일은 없습니다.** 루프가 판단을 요청할 때는 반드시 한국어 PR 로 올라옵니다. `STATE.md`, `HALT`, `OPERATOR-DECISIONS.md` 를 손으로 바꾸지 마세요 — PR 머지가 유일한 승인 통로입니다.
 
 화면은 자동 갱신되지 않습니다. 새로 보려면 **같은 .cmd 다시 더블클릭**. 오토파일럿 자체도 매 반복 끝에 이 화면을 스스로 갱신합니다 (`.cmd` 없이도 최신 상태 유지).
 
@@ -45,7 +48,7 @@ A **runner-agnostic, AI-agnostic, single-prompt, infinitely self-improving** dev
 관리자.ps1/sh의 `상태`가 🚨를 보여주면, 시키는 대로 클로드 코드 채팅에 `/loop .autopilot/PROMPT.md` 한 줄만 다시 입력하면 됩니다. 그게 전부입니다.
 
 ### 자주 묻는 질문
-- **PR을 제가 직접 머지해야 하나요?** 아니요. 자동 머지(`gh pr merge --squash --delete-branch --auto`)가 기본 동작입니다. 단, 안전을 위해 사람 승인을 강제하고 싶다면 `.autopilot/STATE.md`에 `OPERATOR: require human review` 줄을 추가하세요.
+- **PR을 제가 직접 머지해야 하나요?** 일반 작업 PR 은 자동 머지(`gh pr merge --squash --delete-branch --auto`)입니다. **예외는 딱 하나** — `🙋 결정 필요: ...` 제목의 한국어 결정 PR. 이것만 관리자가 머지합니다. 이 PR 은 루프가 방향이나 승인을 묻고 싶을 때 올리며, 관리자가 해야 할 일은 **PR 열기 → (선택) 옵션 체크 → 머지** 뿐입니다. `STATE.md`, `HALT`, 어떤 파일도 손으로 만지지 마세요.
 - **느려요. 30분이나 기다려요.** 이미 60초로 단축됐습니다 (`PROMPT.md` Pacing 섹션). 그래도 느리면 `.autopilot/STATE.md`에 `OPERATOR: pace 60`을 추가하세요.
 - **갑자기 멈췄어요.** 99%는 자동 재예약(ScheduleWakeup) 누락입니다. `상태` 명령이 진단해주고 복구 방법(`/loop` 재입력)을 직접 알려줍니다.
 - **개발자에게 보여줄 로그는 어디 있나요?** `.autopilot/HISTORY.md` (최근 10개), `.autopilot/METRICS.jsonl` (모든 반복), `.autopilot/PITFALLS.md` (실수 기록).
@@ -174,26 +177,25 @@ schtasks /Create /XML .autopilot\runners\task-scheduler.xml /TN "Autopilot"
 
 ## Operator controls
 
+**Single-path rule:** any decision that needs the operator is surfaced as a Korean-titled PR (`🙋 결정 필요: ...`). The operator's only action is **merge that PR**. Editing `STATE.md`, `HALT`, or `OPERATOR-DECISIONS.md` by hand is deprecated — the loop writes those itself in response to PR merges. See `[IMMUTABLE:decision-pr-invariants]` in `PROMPT.md`.
+
 | Control | What it does |
 |---------|--------------|
-| `touch .autopilot/HALT` | Loop exits at next boot. |
-| `rm .autopilot/HALT` | Loop resumes at next runner wake-up. |
-| Add `OPERATOR: halt` to STATE.md | Same as HALT. |
-| Add `OPERATOR: focus on X` to STATE.md | Forces X as active task next iteration. |
-| Add `OPERATOR: halt evolution` to STATE.md | Disables self-evolution; other modes keep running. |
-| Add `OPERATOR: allow evolution <reason>` to STATE.md | Permits a single evolution commit. |
-| Add `OPERATOR: require human review` to STATE.md | Disables auto-merge; PRs wait for a human. |
-| Add paths to `protected_paths:` in STATE.md | PRs touching these paths refuse to auto-merge. |
-| Edit BACKLOG.md directly | Items you add are picked up on the next boot. |
+| **Merge a `🙋 결정 필요` PR** | **The one and only approval path.** Resumes from `awaiting-decision`, sets direction, toggles review-gates, etc — all via the merged `OPERATOR-DECISIONS.md` block. |
+| `touch .autopilot/HALT` (dashboard button) | Emergency kill only. Loop exits at next boot. |
+| `rm .autopilot/HALT` (dashboard "재개") | Emergency resume. Not for direction decisions — those go through a decision PR. |
+| Edit BACKLOG.md directly | Items you add are picked up on the next boot. (Still allowed — BACKLOG is a to-do pile, not a decision.) |
 | `bash .autopilot/project.sh stop` / `.ps1 stop` | Polite stop (touches HALT). |
 | Delete `.autopilot/LOCK` | Only if a crashed instance left stale lock >90 min old (the loop does this itself). |
+| *(legacy)* `OPERATOR: …` lines in STATE.md | Still honored for backwards compat, but the loop no longer asks operators to add them. The decision-PR flow replaces this surface. |
 
 ## Files at a glance
 
 ```
 .autopilot/
 ├── PROMPT.md               # the only prompt; submitted verbatim every wake-up
-├── STATE.md                # live state, ≤60 lines (edit freely between iters)
+├── STATE.md                # live state, ≤60 lines (loop-managed; operators don't edit)
+├── OPERATOR-DECISIONS.md   # append-only decision log; loop opens PR, operator merges
 ├── BACKLOG.md              # prioritized task list
 ├── HISTORY.md              # last 10 iterations (3 bullets each)
 ├── HISTORY-ARCHIVE.md      # older entries

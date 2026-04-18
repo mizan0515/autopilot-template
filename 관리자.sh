@@ -20,10 +20,29 @@ verb="${1:-메뉴}"
   줄
 
   if [ -f "$ap/HALT" ]; then
-    echo "🩺 건강 신호: ⛔ 지금은 멈춰 있습니다"
-    echo "   누군가 정지 버튼을 눌렀어요. 재개하려면:"
-    echo "   bash .autopilot/관리자.sh 재개"
+    halt_body=$(tr -d '\r' < "$ap/HALT" 2>/dev/null | head -c 400)
+    case "$halt_body" in
+      *pending-decision*|*awaiting*|*decision*|*operator-direction*|*post-mvp*)
+        echo "🙋 결정 PR 머지만 하시면 됩니다 (루프가 판단 대기 중)."
+        echo "   → GitHub 에서 '🙋 결정 필요' 제목의 PR 을 찾아 머지하세요."
+        echo "   → 파일 직접 수정·HALT 삭제 불필요. PR 머지로 자동 재개됩니다." ;;
+      *)
+        echo "🩺 건강 신호: ⛔ 비상정지 상태입니다"
+        echo "   재개하려면 이 스크립트 한 줄만 실행하세요:"
+        echo "   bash .autopilot/관리자.sh 재개" ;;
+    esac
     줄; return
+  fi
+
+  # awaiting-decision (HALT 아님) — STATE.md 의 decision_pr 표시
+  if [ -f "$ap/STATE.md" ]; then
+    dec_pr=$(grep -E '^decision_pr:' "$ap/STATE.md" | head -1 | sed -E 's/^decision_pr:\s*//')
+    if [ -n "$dec_pr" ] && [ "$dec_pr" != "null" ]; then
+      echo "🙋 결정 PR 머지 대기 중: $dec_pr"
+      echo "   → 이 PR 을 열어 옵션 하나만 [x] 체크(안 해도 A 기본) 후 머지 버튼."
+      echo "   → 그게 전부입니다. 파일 편집 불필요."
+      줄
+    fi
   fi
 
   if [ -f "$ap/STATE.md" ]; then

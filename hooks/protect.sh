@@ -22,7 +22,7 @@ if ! git rev-parse --verify HEAD >/dev/null 2>&1; then
   exit 0
 fi
 
-BLOCKS=(core-contract boot budget blast-radius halt exit-contract wake-reschedule)
+BLOCKS=(core-contract boot budget blast-radius halt exit-contract wake-reschedule decision-pr-invariants)
 
 tmp_base=$(mktemp); tmp_head=$(mktemp)
 trap 'rm -f "$tmp_base" "$tmp_head"' EXIT

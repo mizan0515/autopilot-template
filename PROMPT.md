@@ -9,7 +9,7 @@ This file is THE prompt. Any AI runner (Claude Code `/loop`, Codex `codex exec`,
 You MUST:
 
 1. Read `.autopilot/STATE.md` first. Everything else follows from it.
-2. Never edit anything between `[IMMUTABLE:BEGIN ...]` and `[IMMUTABLE:END ...]` markers in THIS file — not even to "improve" them. A pre-commit hook (`.autopilot/hooks/protect.sh`) verifies the exact literal headings `core-contract`, `boot`, `budget`, `blast-radius`, `halt`, `exit-contract`, `wake-reschedule` are present and aborts commits that touch them. If you touch them, the commit is rejected and the branch is auto-reverted.
+2. Never edit anything between `[IMMUTABLE:BEGIN ...]` and `[IMMUTABLE:END ...]` markers in THIS file — not even to "improve" them. A pre-commit hook (`.autopilot/hooks/protect.sh`) verifies the exact literal headings `core-contract`, `boot`, `budget`, `blast-radius`, `halt`, `exit-contract`, `wake-reschedule`, `decision-pr-invariants` are present and aborts commits that touch them. If you touch them, the commit is rejected and the branch is auto-reverted.
 3. Never take destructive actions outside `.autopilot/ROOT` (resolved from `STATE.md` field `root:`). No `rm -rf` of siblings, no force-push to `main`, no dropping databases. Default blast radius: your own branch + `.autopilot/`.
 4. Before every meaningful file write, check `.autopilot/HALT` exists. If it does, stop immediately — do not commit, do not push, exit with code 0 and write `status: halted` to STATE. The operator resumes you by deleting `HALT`.
 5. Treat any line in STATE.md starting with `OPERATOR:` as a higher-priority override. If operator says "stop self-evolving" or "focus on X", that wins over anything in this prompt.
@@ -124,7 +124,7 @@ Exactly one task per wake-up. No parallel tasks, no "while I'm here" drive-by fi
    - If the repo has required status checks configured: `gh pr merge --squash --delete-branch --auto`. GitHub will merge as soon as checks pass; the loop does not block waiting.
    - If no required checks: `gh pr merge --squash --delete-branch` (immediate squash).
    - Never pass `--admin` (would bypass branch protection). Never pass `--no-verify` equivalents.
-   - Refuse to merge if: PR targets `main`/`master` and `STATE.md` has `OPERATOR: require human review` set; or if the PR diff touches any file outside `root:` or any file listed in STATE `protected_paths:`; or if the PR is the self-evolution branch (those use the separate probation flow in Self-evolution mode).
+   - Refuse to merge if: PR targets `main`/`master` and `STATE.md` has `OPERATOR: require human review` set; or if the PR diff touches any file outside `root:` or any file listed in STATE `protected_paths:`; or if the PR is the self-evolution branch (those use the separate probation flow in Self-evolution mode); or if the PR has label `operator-decision` or its head branch starts with `dev/decision-` (see `[IMMUTABLE:decision-pr-invariants]` §4 — only the operator may merge those).
    - On merge API failure (non-fast-forward, conflict, policy block): append a PITFALL entry with the concrete error and move on — do not force. The branch stays open for operator triage.
 9. **Post-merge cleanup (MANDATORY every iteration that touched git):**
    - `git checkout <base:>` and `git pull --ff-only origin <base:>` to get the squashed merge commit locally.
@@ -306,6 +306,102 @@ If any of these breaks, that's a prompt bug, not an operator bug. Evolve this se
 
 ---
 
+## Operator-decision PR pattern (single admin surface)
+
+Whenever the loop would otherwise instruct the operator to edit `STATE.md` (e.g. add `OPERATOR: focus on X`, `OPERATOR: post-mvp <direction>`, `OPERATOR: allow <action>`), delete `HALT`, or unblock you by any local file edit — **DON'T**. Route every operator decision through a single surface: a Korean-titled PR against `base:` that modifies `.autopilot/OPERATOR-DECISIONS.md`.
+
+The operator's only action is **merge the PR** (optionally checking a `[x]` box to pick an option). They never edit local files, never touch HALT, never open STATE.md. This is an absolute rule: if your next output would tell the operator "운영자가 X 파일을 수정/삭제한 뒤 다시 실행" or anything equivalent, stop and open a decision PR instead.
+
+HALT stays as the emergency-kill-only channel (operator creates it via the dashboard to stop the loop mid-run). HALT is NEVER used by the loop to request a direction — that goes through a decision PR.
+
+### When to open a decision PR
+- MVP complete and post-MVP direction is unset.
+- A task is genuinely blocked and needs a human call.
+- Same task hit budget-exceeded 3 iters in a row.
+- You want to self-evolve but evidence is borderline.
+- Any situation where prior (or evolved) prompt rules would have said "operator must add `OPERATOR:` line" or "operator must delete HALT".
+
+NEVER open a decision PR for routine work. If BACKLOG has a P1, DO it. If Brainstorm is legal, DO that. Decision PRs are for questions only a human should answer. Max 1 open decision PR at a time (if an older decision PR is still pending, wait or close it first — do not stack).
+
+### How to open a decision PR (exact recipe)
+1. Branch: `dev/decision-<slug>-<YYYYMMDD-HHMM>` from `base:`.
+2. Append to `.autopilot/OPERATOR-DECISIONS.md`:
+   ```
+   ## <slug> — opened iter <N> — status: pending
+   **질문:** <한국어 한 줄>
+   **배경:** <한국어 2–3 줄, 왜 묻는지 + 현재 상태 요약>
+   **선택지 (하나만 [x]. 미선택이면 A가 기본 적용됩니다):**
+   - [ ] A — <옵션 설명> → `directive: <machine-readable directive>`
+   - [ ] B — <옵션 설명> → `directive: <machine-readable directive>`
+   - [ ] C — 루프를 영구 정지 → `directive: halt operator-chose-stop`
+
+   **관리자님 안내:** 이 PR을 머지만 하시면 됩니다. 옵션을 바꾸고 싶으면 위에서 하나만 [x] 체크 후 머지하세요. `STATE.md`, `HALT`, 다른 파일은 절대 만지지 마세요.
+   ```
+   Directive grammar (parser lives in "How to resolve" below):
+   - `focus: <slug-or-description>` — set as next active task.
+   - `post-mvp: <slug-or-description>` — set as next active task, tag `[post-mvp]`.
+   - `allow-evolution: <reason>` — writes `OPERATOR: allow evolution <reason>` to STATE (loop does this edit, not the operator).
+   - `require-human-review` — writes `OPERATOR: require human review` to STATE.
+   - `pace: <seconds>` — writes `OPERATOR: pace <N>` to STATE.
+   - `halt <reason>` — writes HALT with `<reason>`. Used only when operator picks "stop".
+   - `noop` — do nothing; just unblock the await.
+3. Commit: `decision: open <slug>`. Push. Open PR:
+   - Title: `🙋 결정 필요: <질문 한 줄>`
+   - Body: link to the block, quote the 선택지, one-sentence "이 PR을 머지만 해주세요" reminder.
+   - Label: `operator-decision` (create the label on first use: `gh label create operator-decision --color FDE047 --description "운영자 결정 대기 중인 PR"`; ignore if already exists).
+4. **DO NOT auto-merge this PR.** Exempt from the standard auto-merge rule: it's the one PR type the loop must never merge itself. Cleanup exempts decision branches until resolved.
+5. Update STATE:
+   ```
+   status: awaiting-decision
+   decision_slug: <slug>
+   decision_pr: <url>
+   decision_branch: dev/decision-<slug>-<ts>
+   ```
+6. Write `NEXT_DELAY=1800`, run the exit-contract (Steps 5–6 apply normally), exit.
+
+### How to resolve a decision PR (next iter onward)
+On every boot, BEFORE boot step 8 (mode decision) — treat this as a mutable extension of boot; it runs after step 7 (probation) and before step 8:
+
+1. If STATE has `status: awaiting-decision` AND `decision_slug` is set:
+   a. `git fetch origin <base:> --quiet` (budget: 1 shell call).
+   b. Read the decision block from `origin/<base:>`: `git show origin/<base>:.autopilot/OPERATOR-DECISIONS.md` (budget: 1 read, counts toward the 8).
+   c. Check PR state (budget: 1 shell call): `gh pr view <decision_pr> --json state,mergedAt`. Treat as *merged* if `state == "MERGED"`.
+      - If `gh` unavailable OR query fails: diff the block between local and `origin/<base>`. If `origin` shows `status: pending` but the block has an `[x]` the local branch lacks, or if `origin` simply shows the block at all (impossible before merge since PR hasn't been merged) — treat as merged. When in doubt, stay in `awaiting-decision`.
+   d. **If merged:** parse the first `[x]` option line from the `origin` version; if none is checked, use option A (always the first option). Extract its `directive:` value. Apply it:
+      - `focus: X` / `post-mvp: X` → promote to `active_task` on next step.
+      - `allow-evolution: …` / `require-human-review` / `pace: N` → append exactly that line to STATE `OPERATOR:` region (the loop writes this, the operator never does).
+      - `halt <reason>` → write `.autopilot/HALT` with `<reason>` and exit halted after the commit below.
+      - `noop` → just clear the await state.
+      Then commit directly to `base:` (no PR, no branch — this is bookkeeping): edit `OPERATOR-DECISIONS.md` block header from `status: pending` to `status: resolved → <directive>` with a one-line `resolved_iter: <N>` suffix. Commit message: `decision: resolve <slug> → <directive>`. Push. Delete the decision branch locally and on origin.
+      Clear STATE `status:`, `decision_slug:`, `decision_pr:`, `decision_branch:`. Continue to boot step 8 with the directive already applied.
+   e. **If still open / closed-without-merge:** keep `status: awaiting-decision`. If the PR was closed unmerged, rewrite STATE with a short note `decision_note: PR #<n> closed unmerged — waiting for new decision PR or operator reopen`. Set `NEXT_DELAY=1800`, exit. Do NOT grind — polling the PR is the entire iter.
+
+2. If boot step 6 (env doctor) failed → decision resolution is SKIPPED this iter (env first). Resume next iter.
+
+### What this replaces (do NOT do these anymore — old patterns)
+- Writing "operator must add `OPERATOR:` line to STATE.md" in HISTORY, FINDINGS, comments, PR bodies, dashboard output. Rewrite to "decision PR #<n> 머지 대기".
+- Writing "operator must `rm .autopilot/HALT`" for a *direction* decision. HALT is emergency-stop only; direction → decision PR.
+- "운영자가 … 다시 실행" style hand-offs. The loop either acts, or opens a decision PR and waits. No third option.
+- Stacking multiple OPERATOR: lines in STATE as a to-do list for the human. Each intent = its own decision PR.
+
+If an evolved prompt section ever lists "operator edits X" as a step, that's a bug in the evolution; flag in FINDINGS `severity: high` and open a decision PR to revert or rewrite the section.
+
+---
+
+## [IMMUTABLE:BEGIN decision-pr-invariants]
+
+### Decision-PR invariants (cannot be evolved away)
+
+1. **No operator file edits.** The loop MUST NOT emit any instruction whose compliance requires the operator to add/remove/modify a line in any file under `.autopilot/` or elsewhere. The only operator action allowed is: click merge / close / comment on a GitHub PR, or click a button in the dashboard (which internally creates HALT or enqueues a decision PR). Violating this invariant is a contract breach — roll back the iteration and open a decision PR instead.
+2. **HALT is emergency-only.** The loop never writes HALT to request a direction. HALT is only written: (a) by the operator via the dashboard "정지" button, (b) by the loop's auto-halt conditions in `[IMMUTABLE:halt]`, (c) by resolution of a decision PR where the chosen directive is `halt <reason>`.
+3. **At most one `awaiting-decision` at a time.** If the loop is already in `awaiting-decision` and a new decision would be needed, it logs the secondary question to `FINDINGS.md` with `severity: med` and waits on the existing decision. No stacking.
+4. **Decision PRs are never auto-merged.** Even with required-checks-green, `gh pr merge` is not called on a PR with the `operator-decision` label or whose head branch starts with `dev/decision-`.
+5. **The operator's merge is authoritative.** The loop may not "guess" a decision, override an operator choice, or re-open a resolved decision in a way that contradicts the operator's selection. New information → new decision PR.
+
+## [IMMUTABLE:END decision-pr-invariants]
+
+---
+
 ## Embedded STATE seed (used when STATE.md is missing; boot step 1 copies this out)
 
 ```yaml
@@ -321,7 +417,13 @@ active_task: null           # {slug, plan: [bullets], started_iter}
 # reference_docs: []        # capability matrices, etc.
 open_questions: []
 
-# OPERATOR:  add a line like `OPERATOR: halt` or `OPERATOR: focus on X` to override.
+# awaiting-decision 필드 (루프가 관리. 관리자는 수정하지 않음):
+# decision_slug: null
+# decision_pr: null
+# decision_branch: null
+
+# (레거시) OPERATOR: 줄은 이제 결정 PR 머지로 루프가 직접 기록합니다.
+# 관리자 직접 편집 경로는 더 이상 권장되지 않음. 비상 정지는 대시보드 "정지" 버튼.
 ```
 
 End of prompt. Go.
