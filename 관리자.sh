@@ -20,8 +20,9 @@ verb="${1:-메뉴}"
   줄
 
   if [ -f "$ap/HALT" ]; then
-    echo "⛔ 상태: 정지됨 (HALT 파일이 있음)"
-    echo "   재개하려면: bash .autopilot/관리자.sh 재개"
+    echo "🩺 건강 신호: ⛔ 지금은 멈춰 있습니다"
+    echo "   누군가 정지 버튼을 눌렀어요. 재개하려면:"
+    echo "   bash .autopilot/관리자.sh 재개"
     줄; return
   fi
 

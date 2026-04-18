@@ -171,47 +171,83 @@ function 대시보드데이터수집 {
     hero_class       = 'ok'
     action_title     = '✅ 없습니다. 지금은 기다리면 됩니다.'
     action_body_html = '오토파일럿이 알아서 다음 작업을 시작합니다. 아무것도 안 하셔도 됩니다.'
+    health_class     = 'ok'
+    health_title     = '✅ 정상 작동 중입니다'
+    health_detail    = '지금 이 순간 아무 문제도 감지되지 않았어요.'
     wake_summary     = '—'
     wake_hint        = ''
     progress_pct     = 0
+    big_goals        = @()
+    needs_approval   = @()
+    do_not_worry     = @(
+      'iteration / iter 숫자 — 그냥 "몇 번 일했나"의 표시예요.',
+      'LOCK / NEXT_DELAY / LAST_RESCHEDULE 같은 내부 파일 — 오토파일럿이 알아서 관리합니다.',
+      'PR / 브랜치 / 머지 충돌 없는 상황 — 모두 자동 처리됩니다.',
+      '영어 커밋 메시지 — 코드 관리용이라 읽지 않으셔도 됩니다.',
+      'METRICS.jsonl / EVOLUTION.md 같은 로그 — 개발자용 기록입니다.'
+    )
     history_lines    = @()
   }
 
-  # HALT 우선 판정
-  if (Test-Path (Join-Path $ap 'HALT')) {
+  $halted = Test-Path (Join-Path $ap 'HALT')
+
+  # ── HALT 우선 판정 ────────────────────────────────────
+  if ($halted) {
     $data.hero_class       = 'halted'
     $data.action_title     = '⛔ 정지된 상태입니다. 재개하려면 직접 켜셔야 합니다.'
     $data.action_body_html = 'PowerShell에서 <code>.\.autopilot\관리자.ps1 재개</code> 를 실행한 뒤, 클로드 코드 채팅에 <code>/loop .autopilot/PROMPT.md</code> 를 입력하세요.'
     $data.status           = '정지됨 (HALT)'
+    $data.health_class     = 'halted'
+    $data.health_title     = '⛔ 지금은 멈춰 있습니다'
+    $data.health_detail    = '누군가 정지 버튼을 눌렀어요. 재개하면 정상 동작합니다.'
   }
 
-  # STATE.md
+  # ── STATE.md 파싱 ────────────────────────────────────
   $sp = Join-Path $ap 'STATE.md'
+  $operatorReviewRequired = $false
+  $operatorLines = @()
+  $openQuestions = @()
   if (Test-Path $sp) {
-    $statusLine = Select-String -Path $sp -Pattern '^status:' | Select-Object -First 1
-    $iterLine   = Select-String -Path $sp -Pattern '^iteration:' | Select-Object -First 1
-    if ($statusLine -and -not (Test-Path (Join-Path $ap 'HALT'))) {
-      $data.status = ($statusLine.Line -replace '^status:\s*','').Trim()
+    $stateContent = Get-Content $sp
+    foreach ($line in $stateContent) {
+      if ($line -match '^status:\s*(.+)$' -and -not $halted) {
+        $data.status = $Matches[1].Trim()
+      }
+      if ($line -match '^iteration:\s*(\d+)') {
+        $data.iteration = [int]$Matches[1]
+        $data.iteration_hint = "현재까지 $($Matches[1])번 일했어요"
+        $data.progress_pct = [math]::Round(([int]$Matches[1] % 20) / 20 * 100)
+      }
+      if ($line -match '^OPERATOR:\s*(.+)$') {
+        $op = $Matches[1].Trim()
+        $operatorLines += $op
+        if ($op -match 'require human review') { $operatorReviewRequired = $true }
+      }
+      if ($line -match '^\s*-\s*(.+)$' -and $line -notmatch '^OPERATOR:') {
+        # very loose — matching list items that might be open questions; filter later
+      }
     }
-    if ($iterLine) {
-      $n = ($iterLine.Line -replace '^iteration:\s*','').Trim()
-      if ($n -match '^\d+$') {
-        $data.iteration = [int]$n
-        $data.iteration_hint = "$n 번째 반복 중"
-        # 진행도 바: 단순히 (iter mod 20) / 20 * 100 — 심리적 피드백용, 실제 완료율 아님
-        $data.progress_pct = [math]::Round(([int]$n % 20) / 20 * 100)
+    # open_questions 섹션 (YAML 리스트 형태면 거칠게 뽑기)
+    $inQ = $false
+    foreach ($line in $stateContent) {
+      if ($line -match '^open_questions:') { $inQ = $true; continue }
+      if ($inQ) {
+        if ($line -match '^\s*-\s*(.+)$') { $openQuestions += $Matches[1].Trim() }
+        elseif ($line -match '^\S') { $inQ = $false }
       }
     }
   }
 
-  # 재예약 판정 (HALT 아닐 때만 덮어씀)
-  if (-not (Test-Path (Join-Path $ap 'HALT'))) {
+  # ── 재예약(wake) 판정 ────────────────────────────────
+  $wakeBad = $false
+  if (-not $halted) {
     $nd = Join-Path $ap 'NEXT_DELAY'
     $lr = Join-Path $ap 'LAST_RESCHEDULE'
     if (-not (Test-Path $nd)) {
       $data.wake_summary = '⏳ 아직 첫 반복 진행 중'
       $data.wake_hint    = '조금만 기다려 주세요.'
     } elseif (-not (Test-Path $lr)) {
+      $wakeBad = $true
       $data.hero_class       = 'stuck'
       $data.action_title     = '🚨 멈췄습니다. 다시 켜주세요.'
       $data.action_body_html = '클로드 코드 채팅에 <code>/loop .autopilot/PROMPT.md</code> 를 다시 입력해 주세요.'
@@ -224,6 +260,7 @@ function 대시보드데이터수집 {
       if ($line1 -like 'halted*' -or $line1 -like 'external-runner:*') {
         $data.wake_summary = '면제 상태'; $data.wake_hint = $line1
       } elseif ([string]::IsNullOrWhiteSpace($line2) -or $line2 -eq $line1) {
+        $wakeBad = $true
         $data.hero_class       = 'stuck'
         $data.action_title     = '🚨 증거가 부실합니다 (위조 의심).'
         $data.action_body_html = '깨어남 증거 파일의 두 번째 줄이 비어있어요. 클로드 코드 채팅에 <code>/loop .autopilot/PROMPT.md</code> 를 다시 입력해 주세요.'
@@ -239,6 +276,7 @@ function 대시보드데이터수집 {
           $minAgo = [math]::Round($age/60, 1)
           $expectedMin = [math]::Round($delay/60, 1)
           if ($age -gt ($delay + $slack)) {
+            $wakeBad = $true
             $data.hero_class       = 'stuck'
             $data.action_title     = "🚨 $minAgo 분 전에 깨어났어야 하는데 멈춰있어요."
             $data.action_body_html = '클로드 코드 채팅에 <code>/loop .autopilot/PROMPT.md</code> 를 다시 입력해 주세요.'
@@ -260,7 +298,68 @@ function 대시보드데이터수집 {
     }
   }
 
-  # HISTORY 마지막 12줄 — 반드시 [string[]] 로 강제 (PSObject 유출 시 JSON 5MB 폭증)
+  # ── BACKLOG P1 → 큰 목표 목록 ────────────────────────
+  $bp = Join-Path $ap 'BACKLOG.md'
+  $mvp = Join-Path $ap 'MVP-GATES.md'
+  $goals = @()
+  if (Test-Path $mvp) {
+    # MVP 게이트가 있으면 우선 — 체크 안 된 것만
+    foreach ($line in Get-Content $mvp) {
+      if ($line -match '^\s*-\s*\[\s\]\s*(.+)$') {
+        $goals += ($Matches[1].Trim() -replace '\s*\(.+?\)\s*$','').Substring(0, [math]::Min(80, ($Matches[1].Trim()).Length))
+        if ($goals.Count -ge 5) { break }
+      }
+    }
+  }
+  if ($goals.Count -eq 0 -and (Test-Path $bp)) {
+    foreach ($line in Get-Content $bp) {
+      if ($line -match '^\s*[-*]\s*\[P1\]\s*(.+)$') {
+        $t = $Matches[1].Trim()
+        if ($t.Length -gt 100) { $t = $t.Substring(0, 100) + '…' }
+        $goals += $t
+        if ($goals.Count -ge 5) { break }
+      }
+    }
+  }
+  $data.big_goals = [string[]]$goals
+
+  # ── 관리자 확인 필요 목록 ────────────────────────────
+  $approvals = @()
+  if ($operatorReviewRequired) {
+    $approvals += 'STATE.md에 "require human review" 옵션이 켜져있어요. 열린 PR을 직접 확인·머지해 주세요.'
+  }
+  foreach ($q in $openQuestions) {
+    if ($q) { $approvals += "열린 질문: $q" }
+  }
+  # 활성 PR 중 [review-needed] 라벨이 있는지 체크는 gh 호출이라 대시보드에서는 스킵
+  $data.needs_approval = [string[]]$approvals
+
+  # ── 건강 신호 5종 산출 (HALT 우선 이미 세팅됨) ──────
+  if (-not $halted) {
+    if ($wakeBad) {
+      $data.health_class  = 'restart'
+      $data.health_title  = '🔁 재시작만 하면 됩니다'
+      $data.health_detail = '자동 깨어남이 끊겼어요. 클로드 코드에서 /loop를 한 번만 다시 입력해 주세요.'
+    } elseif ($approvals.Count -gt 0) {
+      $data.health_class  = 'review'
+      $data.health_title  = '🙋 관리자 확인이 한 번 필요합니다'
+      $data.health_detail = "총 $($approvals.Count)건. 아래 '관리자 확인이 필요한 일' 섹션을 봐주세요."
+    } elseif ($data.status -match 'env-broken|blocked|error|fail') {
+      $data.health_class  = 'review'
+      $data.health_title  = '🙋 관리자 확인이 한 번 필요합니다'
+      $data.health_detail = "상태가 '$($data.status)' 입니다. 개발자에게 알려주세요."
+    } elseif ($data.status -match 'idle|upkeep|waiting' -or ($data.iteration -ne $null -and $data.progress_pct -eq 0 -and $data.iteration -gt 0)) {
+      $data.health_class  = 'waiting'
+      $data.health_title  = '💤 정상 대기 중입니다'
+      $data.health_detail = '할 일이 잠시 비어서 다음 반복까지 대기하고 있어요. 문제 없습니다.'
+    } else {
+      $data.health_class  = 'ok'
+      $data.health_title  = '✅ 정상 작동 중입니다'
+      $data.health_detail = '지금 이 순간 아무 문제도 감지되지 않았어요.'
+    }
+  }
+
+  # ── HISTORY 마지막 12줄 ──────────────────────────────
   $hist = Join-Path $ap 'HISTORY.md'
   if (Test-Path $hist) {
     $data.history_lines = [string[]](@(Get-Content $hist -Tail 12) | ForEach-Object { [string]$_ })
