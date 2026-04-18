@@ -2,6 +2,46 @@
 
 A **runner-agnostic, AI-agnostic, single-prompt, infinitely self-improving** dev loop scaffold. Copy `.autopilot/` into any project, point a runner at it, and let it run.
 
+---
+
+## 🇰🇷 비개발자용 빠른 안내 (한국어)
+
+영어 안내가 부담스러운 운영자용 한국어 요약입니다. 이 한 섹션만 봐도 매일 운영 가능합니다.
+
+### 한 번만 설치 (개발자에게 부탁)
+프로젝트에 `.autopilot/` 폴더가 이미 있다면 건너뛰세요. 없으면 개발자에게 "이 README의 Install 섹션대로 깔아 달라"고 한 번만 요청.
+
+### 매일 쓰는 명령 — 두 개만 외우세요
+
+| 하고 싶은 일 | 윈도우 (PowerShell) | 맥/리눅스 |
+|---|---|---|
+| **상태 확인** (잘 돌고 있나?) | `.\.autopilot\관리자.ps1 상태` | `bash .autopilot/관리자.sh 상태` |
+| **메뉴 열기** (모르겠으면 이거) | `.\.autopilot\관리자.ps1` | `bash .autopilot/관리자.sh` |
+
+`상태` 명령을 치면 한국어로 다음 중 하나를 알려줍니다:
+- ✅ **정상 동작 중** — 아무것도 안 해도 됩니다.
+- 🚨 **멈춤 확인** — 클로드 코드 채팅에 `/loop .autopilot/PROMPT.md`를 다시 입력하세요. (스크립트가 직접 알려줍니다)
+- ⛔ **정지됨** — 누가 `정지`를 눌렀어요. `재개`를 누르고 위 명령 다시 입력.
+
+### 시작하는 법
+1. **클로드 코드** 앱(터미널)을 엽니다.
+2. 채팅창에 다음 한 줄을 입력하고 엔터:
+   ```
+   /loop .autopilot/PROMPT.md
+   ```
+3. 끝. 이후 작업·커밋·PR 만들기·머지·브랜치 정리까지 **모두 자동**입니다. 사람이 PR을 손으로 누를 필요가 없습니다 (단, 깃허브 저장소 보호 규칙으로 막혀있다면 그건 풀어줘야 합니다).
+
+### 멈춘 것 같을 때
+관리자.ps1/sh의 `상태`가 🚨를 보여주면, 시키는 대로 클로드 코드 채팅에 `/loop .autopilot/PROMPT.md` 한 줄만 다시 입력하면 됩니다. 그게 전부입니다.
+
+### 자주 묻는 질문
+- **PR을 제가 직접 머지해야 하나요?** 아니요. 자동 머지(`gh pr merge --squash --delete-branch --auto`)가 기본 동작입니다. 단, 안전을 위해 사람 승인을 강제하고 싶다면 `.autopilot/STATE.md`에 `OPERATOR: require human review` 줄을 추가하세요.
+- **느려요. 30분이나 기다려요.** 이미 60초로 단축됐습니다 (`PROMPT.md` Pacing 섹션). 그래도 느리면 `.autopilot/STATE.md`에 `OPERATOR: pace 60`을 추가하세요.
+- **갑자기 멈췄어요.** 99%는 자동 재예약(ScheduleWakeup) 누락입니다. `상태` 명령이 진단해주고 복구 방법(`/loop` 재입력)을 직접 알려줍니다.
+- **개발자에게 보여줄 로그는 어디 있나요?** `.autopilot/HISTORY.md` (최근 10개), `.autopilot/METRICS.jsonl` (모든 반복), `.autopilot/PITFALLS.md` (실수 기록).
+
+---
+
 ## Design principles
 
 1. **Stateless prompt, stateful files.** `PROMPT.md` is re-submitted verbatim every wake-up. All continuity lives in sibling files (`STATE.md`, `HISTORY.md`, `PITFALLS.md`, ...). No conversation memory required → works with any AI CLI.
@@ -32,7 +72,7 @@ The loop also **autonomously maintains plan and spec docs**: every Active/Upkeep
 cp -r /path/to/autopilot-template .autopilot
 
 # Make scripts executable (Unix)
-chmod +x .autopilot/hooks/protect.sh .autopilot/runners/runner.sh
+chmod +x .autopilot/hooks/protect.sh .autopilot/runners/runner.sh .autopilot/관리자.sh
 
 # Pick a project wrapper (customize test/audit/doctor for your stack):
 mv .autopilot/project.example.sh  .autopilot/project.sh      # Unix
