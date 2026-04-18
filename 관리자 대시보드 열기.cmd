@@ -1,18 +1,19 @@
-ï»¿@echo off
+@echo off
 rem Autopilot admin dashboard launcher.
 rem Double-click to refresh status + open the Korean HTML dashboard.
 rem
-rem Note: this file is saved as UTF-8 WITH BOM so cmd.exe parses the
-rem Korean filename "ê´€ë¦¬ì.ps1" correctly on Korean Windows (CP949 default).
-rem If you see garbled text errors, check that the BOM (EF BB BF) is still
-rem present at the very start of this file.
+rem IMPORTANT: this file MUST be saved in CP949 (Korean ANSI), NOT UTF-8.
+rem Korean Windows cmd.exe reads batch files as CP949 by default. A UTF-8
+rem BOM gets interpreted as a command (shows up as garbled chars like
+rem  ï»?echo ), and UTF-8 bytes for  °ü¸®ÀÚ.ps1  get decoded as  Œ¨?ˆì–´?? .
+rem If you edit this file, save as  ANSI  or  EUC-KR / CP949 , never UTF-8.
 
 cd /d "%~dp0"
-powershell -NoProfile -ExecutionPolicy Bypass -File ".\ê´€ë¦¬ì.ps1" dashboard
+powershell -NoProfile -ExecutionPolicy Bypass -File ".\°ü¸®ÀÚ.ps1" dashboard
 
 if errorlevel 1 (
   echo.
-  echo [!] ëŒ€ì‹œë³´ë“œ ì—´ê¸°ì— ì‹¤íŒ¨í–ˆì–´ìš”. ìœ„ ì—ëŸ¬ ë©”ì‹œì§€ë¥¼ ê°œë°œìì—ê²Œ ë³´ì—¬ì£¼ì„¸ìš”.
+  echo [!] ´ë½Ãº¸µå ¿­±â¿¡ ½ÇÆĞÇß¾î¿ä. À§ ¿¡·¯ ¸Ş½ÃÁö¸¦ °³¹ßÀÚ¿¡°Ô º¸¿©ÁÖ¼¼¿ä.
   echo [!] Dashboard launch failed. Please show the error above to a developer.
   pause
 )
