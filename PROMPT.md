@@ -360,11 +360,13 @@ NEVER open a decision PR for routine work. If BACKLOG has a P1, DO it. If Brains
 6. Write `NEXT_DELAY=1800`, run the exit-contract (Steps 5–6 apply normally), exit.
 
 ### How to resolve a decision PR (next iter onward)
-On every boot, BEFORE boot step 8 (mode decision) — treat this as a mutable extension of boot; it runs after step 7 (probation) and before step 8:
+On every boot, BEFORE boot step 8 (mode decision) — treat this as a mutable extension of boot; it runs after step 7 (probation) and before step 8.
+
+**Branch-robustness rule:** `origin/<base:>` is the single source of truth for whether a decision is resolved. The local working tree might be on a dev branch that hasn't pulled the merge yet — that's fine, never trust the local `.autopilot/OPERATOR-DECISIONS.md`. Always read from `origin/<base:>`.
 
 1. If STATE has `status: awaiting-decision` AND `decision_slug` is set:
-   a. `git fetch origin <base:> --quiet` (budget: 1 shell call).
-   b. Read the decision block from `origin/<base:>`: `git show origin/<base>:.autopilot/OPERATOR-DECISIONS.md` (budget: 1 read, counts toward the 8).
+   a. `git fetch origin <base:> --quiet` (budget: 1 shell call). If fetch fails (offline), skip resolution this iter and keep `awaiting-decision`; NEXT_DELAY=1800.
+   b. Read the decision block from `origin/<base:>`: `git show origin/<base>:.autopilot/OPERATOR-DECISIONS.md` (budget: 1 read, counts toward the 8). Parse statuses.
    c. Check PR state (budget: 1 shell call): `gh pr view <decision_pr> --json state,mergedAt`. Treat as *merged* if `state == "MERGED"`.
       - If `gh` unavailable OR query fails: diff the block between local and `origin/<base>`. If `origin` shows `status: pending` but the block has an `[x]` the local branch lacks, or if `origin` simply shows the block at all (impossible before merge since PR hasn't been merged) — treat as merged. When in doubt, stay in `awaiting-decision`.
    d. **If merged:** parse the first `[x]` option line from the `origin` version; if none is checked, use option A (always the first option). Extract its `directive:` value. Apply it:
@@ -372,6 +374,11 @@ On every boot, BEFORE boot step 8 (mode decision) — treat this as a mutable ex
       - `allow-evolution: …` / `require-human-review` / `pace: N` → append exactly that line to STATE `OPERATOR:` region (the loop writes this, the operator never does).
       - `halt <reason>` → write `.autopilot/HALT` with `<reason>` and exit halted after the commit below.
       - `noop` → just clear the await state.
+
+      **Auto-unblock side effects (every merged resolution does ALL of these, regardless of directive):**
+      - If `.autopilot/HALT` exists AND its body mentions `pending-decision|awaiting|decision|operator-direction|post-mvp`, **delete HALT**. The operator's PR merge is the "resume" signal; they must not have to also run `재개`. (HALT bodies that are bare `user-halt` / unrelated stay put — we only clear decision-related halts.)
+      - **Sync the local working-tree `.autopilot/OPERATOR-DECISIONS.md` with the `origin/<base:>` version** via `git checkout origin/<base> -- .autopilot/OPERATOR-DECISIONS.md` (even if the loop is on a dev branch — this is a single-file, same-path checkout, safe). Without this, dashboards on dev branches would keep showing `pending` forever.
+
       Then commit directly to `base:` (no PR, no branch — this is bookkeeping): edit `OPERATOR-DECISIONS.md` block header from `status: pending` to `status: resolved → <directive>` with a one-line `resolved_iter: <N>` suffix. Commit message: `decision: resolve <slug> → <directive>`. Push. Delete the decision branch locally and on origin.
       Clear STATE `status:`, `decision_slug:`, `decision_pr:`, `decision_branch:`. Continue to boot step 8 with the directive already applied.
    e. **If still open / closed-without-merge:** keep `status: awaiting-decision`. If the PR was closed unmerged, rewrite STATE with a short note `decision_note: PR #<n> closed unmerged — waiting for new decision PR or operator reopen`. Set `NEXT_DELAY=1800`, exit. Do NOT grind — polling the PR is the entire iter.

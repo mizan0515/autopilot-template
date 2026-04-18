@@ -19,10 +19,134 @@ $OutputEncoding = [System.Text.Encoding]::UTF8
 
 function 줄 { Write-Host ('─' * 60) }
 
+# ────────────────────────────────────────────────────────────────────
+# 원격 동기화 + 결정 PR 해소 감지
+# "선택 PR은 머지됐는데 로컬(특히 dev 브랜치)은 아직 pending으로 보임" 문제를
+# 막기 위해, 스크립트는 매 실행 시 origin/<base> 의 OPERATOR-DECISIONS.md 를
+# 권위자로 취급한다. 그 파일에서 해당 슬러그가 resolved 상태면:
+#   (a) 로컬 작업 디렉터리의 .autopilot/OPERATOR-DECISIONS.md 를 origin 버전으로 동기화
+#   (b) HALT 가 남아있으면 자동 삭제 (머지 = 재개 계약)
+#   (c) STATE.md 의 decision_* 필드도 정리 (해소된 결정 흔적 지우기)
+# 오프라인/원격없음은 오류 없이 조용히 스킵.
+# ────────────────────────────────────────────────────────────────────
+
+function 베이스브랜치 {
+  # STATE.md 의 base: 필드를 우선, 없으면 main.
+  $sp = Join-Path $ap 'STATE.md'
+  if (Test-Path $sp) {
+    $m = Select-String -Path $sp -Pattern '^base:\s*(\S+)' | Select-Object -First 1
+    if ($m -and $m.Matches.Count -gt 0) { return $m.Matches[0].Groups[1].Value.Trim() }
+  }
+  return 'main'
+}
+
+function 원격동기화 {
+  # 작업 트리가 더럽혀지지 않도록 fetch 만 수행. pull/checkout 은 하지 않는다.
+  try {
+    git -C (Split-Path $ap -Parent) fetch origin --quiet 2>$null | Out-Null
+  } catch { }
+}
+
+function 원격결정파일읽기 {
+  param([string]$base)
+  try {
+    $repoRoot = (git -C (Split-Path $ap -Parent) rev-parse --show-toplevel 2>$null).Trim()
+    if (-not $repoRoot) { return $null }
+    # .autopilot 가 리포 루트 하위 어디에 있는지 계산.
+    $apAbs  = (Resolve-Path $ap).Path
+    $rel    = $apAbs.Substring($repoRoot.Length).TrimStart('\','/') -replace '\\','/'
+    $gitPath = "$rel/OPERATOR-DECISIONS.md"
+    $text = git -C $repoRoot show "origin/${base}:$gitPath" 2>$null
+    if ($LASTEXITCODE -ne 0) { return $null }
+    return $text
+  } catch { return $null }
+}
+
+function 결정상태맵 {
+  param([string]$text)
+  # 반환: @{ slug = 'pending'|'resolved' } 해시.
+  $map = @{}
+  if (-not $text) { return $map }
+  foreach ($line in ($text -split "`n")) {
+    if ($line -match '^##\s*(\S+).*status:\s*(pending|resolved)') {
+      $map[$Matches[1]] = $Matches[2]
+    }
+  }
+  return $map
+}
+
+function 결정해소반영 {
+  # origin 에서 resolved 된 슬러그가 있고, STATE.md 의 decision_slug 가 그 중 하나면:
+  # (1) 로컬 .autopilot/OPERATOR-DECISIONS.md 를 origin 버전으로 덮어쓰기
+  # (2) HALT 삭제
+  # (3) STATE 의 decision_* 필드 정리
+  $base = 베이스브랜치
+  원격동기화
+  $remoteText = 원격결정파일읽기 -base $base
+  if (-not $remoteText) { return $null }
+  $remoteMap  = 결정상태맵 -text $remoteText
+
+  # 로컬 STATE 에서 decision_slug 추출
+  $sp = Join-Path $ap 'STATE.md'
+  $decSlug = $null
+  if (Test-Path $sp) {
+    $m = Select-String -Path $sp -Pattern '^decision_slug:\s*(\S+)' | Select-Object -First 1
+    if ($m) {
+      $v = $m.Matches[0].Groups[1].Value.Trim()
+      if ($v -and $v -ne 'null') { $decSlug = $v }
+    }
+  }
+
+  $resolvedNow = $null
+  if ($decSlug -and $remoteMap.ContainsKey($decSlug) -and $remoteMap[$decSlug] -eq 'resolved') {
+    $resolvedNow = $decSlug
+  }
+
+  # 로컬 파일이 origin 과 다르면(즉, 머지 내용을 아직 못 받은 상태면) 동기화
+  $decPath = Join-Path $ap 'OPERATOR-DECISIONS.md'
+  if (Test-Path $decPath) {
+    $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+    $localText = [System.IO.File]::ReadAllText($decPath, $utf8NoBom)
+    if ($localText -ne $remoteText) {
+      [System.IO.File]::WriteAllText($decPath, $remoteText, $utf8NoBom)
+      Write-Host "🔄 OPERATOR-DECISIONS.md 를 origin/$base 기준으로 동기화했어요." -ForegroundColor Cyan
+    }
+  }
+
+  if ($resolvedNow) {
+    $haltPath = Join-Path $ap 'HALT'
+    if (Test-Path $haltPath) {
+      Remove-Item $haltPath -Force
+      Write-Host "✅ 결정 '$resolvedNow' 이 이미 머지되어 HALT 를 자동 해제했어요." -ForegroundColor Green
+    }
+    # STATE 의 decision_* 흔적 정리 (루프가 다음 부팅에서 한번 더 정리하더라도 여기서 먼저 단정)
+    if (Test-Path $sp) {
+      $lines = Get-Content -Encoding UTF8 $sp
+      $newLines = $lines | Where-Object {
+        $_ -notmatch '^decision_slug:' -and
+        $_ -notmatch '^decision_pr:' -and
+        $_ -notmatch '^decision_branch:' -and
+        $_ -notmatch '^decision_note:'
+      }
+      # status: awaiting-decision 도 떼기
+      $newLines = $newLines | ForEach-Object {
+        if ($_ -match '^status:\s*awaiting-decision') { 'status: ready-after-decision' } else { $_ }
+      }
+      $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+      [System.IO.File]::WriteAllText($sp, ($newLines -join "`n") + "`n", $utf8NoBom)
+    }
+    return $resolvedNow
+  }
+  return $null
+}
+
 function 상태읽기 {
   줄
   Write-Host '🤖 오토파일럿 상태 점검' -ForegroundColor Cyan
   줄
+
+  # 0. 원격 머지 감지 — 이미 해소된 결정이면 HALT 도 여기서 자동 해제.
+  try { [void](결정해소반영) } catch { }
 
   # 1. HALT 파일 (정지 상태인지)
   if (Test-Path (Join-Path $ap 'HALT')) {
@@ -105,20 +229,55 @@ function 정지하기 {
 }
 
 function 재개하기 {
+  # 원격 머지 감지: 결정이 이미 머지됐으면 HALT 도 자동 해제됨.
+  $resolved = $null
+  try { $resolved = 결정해소반영 } catch { }
+  if ($resolved) {
+    Write-Host "✅ 머지된 결정 '$resolved' 을(를) 자동 반영했어요." -ForegroundColor Green
+    Write-Host '   이제 클로드 코드 채팅에 /loop 를 다시 입력하면 이어서 돕니다:'
+    Write-Host '   /loop .autopilot/PROMPT.md' -ForegroundColor Cyan
+    return
+  }
+
   $h = Join-Path $ap 'HALT'
   if (Test-Path $h) {
+    $body = try { (Get-Content -Encoding UTF8 -Raw $h).Trim() } catch { '' }
+    if ($body -match 'pending-decision|awaiting|decision|operator-direction|post-mvp') {
+      Write-Host '🙋 결정 PR 이 아직 머지되지 않았어요.' -ForegroundColor Yellow
+      Write-Host '   GitHub 에서 "🙋 결정 필요" PR 을 열어 머지하면 자동 재개됩니다.'
+      Write-Host '   (이 스크립트를 다시 실행하면 머지를 감지해서 HALT 를 자동 해제합니다.)'
+      return
+    }
     Remove-Item $h
-    Write-Host '✅ HALT 파일을 지웠어요. 이제 클로드 코드에서 /loop를 다시 시작하세요:'
+    Write-Host '✅ 비상정지 HALT 를 해제했어요. 이제 클로드 코드에서 /loop 를 다시 시작하세요:'
     Write-Host '   /loop .autopilot/PROMPT.md' -ForegroundColor Cyan
   } else {
-    Write-Host 'ℹ️  HALT 파일이 원래 없었어요. 멈춰있다면 클로드 코드에서 /loop를 다시 입력하세요.'
+    Write-Host 'ℹ️  HALT 파일이 원래 없었어요. 멈춰있다면 클로드 코드에서 /loop 를 다시 입력하세요.'
   }
 }
 
 function 시작안내 {
   줄
-  Write-Host '🚀 오토파일럿 시작 방법' -ForegroundColor Cyan
+  Write-Host '🚀 오토파일럿 시작' -ForegroundColor Cyan
   줄
+
+  # start 를 한 번 누르면 원격 머지 감지 → HALT 자동 해제 → 안내 한 흐름으로.
+  $resolved = $null
+  try { $resolved = 결정해소반영 } catch { }
+  if ($resolved) {
+    Write-Host "✅ 머지된 결정 '$resolved' 을(를) 자동 반영했어요. HALT 도 해제됐습니다." -ForegroundColor Green
+  } else {
+    $h = Join-Path $ap 'HALT'
+    if (Test-Path $h) {
+      $body = try { (Get-Content -Encoding UTF8 -Raw $h).Trim() } catch { '' }
+      if ($body -match 'pending-decision|awaiting|decision|operator-direction|post-mvp') {
+        Write-Host '🙋 결정 PR 이 아직 머지되지 않았어요. GitHub 에서 "🙋 결정 필요" PR 을 머지해 주세요.' -ForegroundColor Yellow
+        Write-Host '   (머지 후 이 명령을 다시 실행하면 자동 재개됩니다.)'
+        줄; return
+      }
+    }
+  }
+
   Write-Host '클로드 코드(터미널 앱)를 열고 다음을 입력하세요:'
   Write-Host ''
   Write-Host '   /loop .autopilot/PROMPT.md' -ForegroundColor Green
@@ -160,6 +319,9 @@ function 메뉴 {
 # ────────────────────────────────────────────────────────────────────
 
 function 대시보드데이터수집 {
+  # 매 대시보드 렌더마다 원격 머지 감지 → 해소 자동 반영.
+  # (오프라인/원격없음은 조용히 스킵하므로 안전.)
+  try { [void](결정해소반영) } catch { }
   $now = Get-Date
   $data = [ordered]@{
     updated_at       = $now.ToUniversalTime().ToString('o')

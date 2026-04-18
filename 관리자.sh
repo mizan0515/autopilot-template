@@ -14,10 +14,82 @@ verb="${1:-메뉴}"
 
 줄() { printf '─%.0s' {1..60}; echo; }
 
+# ─────────────────────────────────────────────────────────────
+# 원격 머지 감지 + 결정 해소 자동 반영
+# 로컬(특히 dev 브랜치)의 OPERATOR-DECISIONS.md 가 stale 일 때에도
+# origin/<base> 를 권위자로 읽어서, resolved 된 결정이면:
+#  (a) 로컬 파일 동기화  (b) HALT 자동 삭제  (c) STATE 의 decision_* 정리
+# 오프라인/원격없음은 조용히 스킵.
+# ─────────────────────────────────────────────────────────────
+
+베이스브랜치() {
+  if [ -f "$ap/STATE.md" ]; then
+    b=$(grep -E '^base:' "$ap/STATE.md" | head -1 | awk '{print $2}')
+    [ -n "$b" ] && { echo "$b"; return; }
+  fi
+  echo "main"
+}
+
+결정해소반영() {
+  local base; base=$(베이스브랜치)
+  local repoRoot; repoRoot=$(git rev-parse --show-toplevel 2>/dev/null) || return 0
+  git fetch origin --quiet 2>/dev/null || true
+  # .autopilot 상대 경로 계산
+  local apAbs; apAbs=$(cd "$ap" && pwd) || return 0
+  local rel="${apAbs#$repoRoot/}"
+  local remoteText
+  remoteText=$(git -C "$repoRoot" show "origin/${base}:${rel}/OPERATOR-DECISIONS.md" 2>/dev/null) || return 0
+  [ -z "$remoteText" ] && return 0
+
+  # STATE 에서 decision_slug 추출
+  local decSlug=""
+  if [ -f "$ap/STATE.md" ]; then
+    decSlug=$(grep -E '^decision_slug:' "$ap/STATE.md" | head -1 | awk '{print $2}')
+    [ "$decSlug" = "null" ] && decSlug=""
+  fi
+
+  # remote 에서 resolved 여부 확인
+  local resolved=""
+  if [ -n "$decSlug" ]; then
+    if echo "$remoteText" | grep -qE "^##\s+${decSlug}.*status:\s*resolved"; then
+      resolved="$decSlug"
+    fi
+  fi
+
+  # 로컬 파일이 origin 과 다르면 동기화
+  if [ -f "$ap/OPERATOR-DECISIONS.md" ]; then
+    local localText; localText=$(cat "$ap/OPERATOR-DECISIONS.md")
+    if [ "$localText" != "$remoteText" ]; then
+      printf '%s' "$remoteText" > "$ap/OPERATOR-DECISIONS.md"
+      echo "🔄 OPERATOR-DECISIONS.md 를 origin/${base} 기준으로 동기화했어요."
+    fi
+  fi
+
+  if [ -n "$resolved" ]; then
+    if [ -f "$ap/HALT" ]; then
+      rm -f "$ap/HALT"
+      echo "✅ 결정 '$resolved' 이 이미 머지되어 HALT 를 자동 해제했어요."
+    fi
+    # STATE decision_* 정리
+    if [ -f "$ap/STATE.md" ]; then
+      tmp=$(mktemp)
+      sed -E -e '/^decision_slug:/d' -e '/^decision_pr:/d' -e '/^decision_branch:/d' -e '/^decision_note:/d' \
+             -e 's/^status:\s*awaiting-decision.*/status: ready-after-decision/' \
+             "$ap/STATE.md" > "$tmp" && mv "$tmp" "$ap/STATE.md"
+    fi
+    echo "$resolved"
+    return 0
+  fi
+  return 0
+}
+
 상태읽기() {
   줄
   echo "🤖 오토파일럿 상태 점검"
   줄
+
+  # 원격 머지 감지 → 해소 자동 반영 (오프라인은 조용히 스킵)
+  결정해소반영 >/dev/null 2>&1 || true
 
   if [ -f "$ap/HALT" ]; then
     halt_body=$(tr -d '\r' < "$ap/HALT" 2>/dev/null | head -c 400)
@@ -111,19 +183,51 @@ verb="${1:-메뉴}"
 }
 
 재개하기() {
+  resolved=$(결정해소반영 2>&1 | tail -1)
+  # 결정해소반영이 resolved 슬러그를 마지막 줄에 echo 하므로 감지.
+  case "$resolved" in
+    ''|🔄*|✅*HALT*) : ;;
+    *) if echo "$resolved" | grep -Eq '^[A-Za-z0-9_-]+$'; then
+         echo "✅ 머지된 결정 '$resolved' 을(를) 자동 반영했어요."
+         echo "   /loop .autopilot/PROMPT.md 를 다시 입력하면 이어서 돕니다."
+         return
+       fi ;;
+  esac
+
   if [ -f "$ap/HALT" ]; then
+    body=$(tr -d '\r' < "$ap/HALT" 2>/dev/null | head -c 400)
+    case "$body" in
+      *pending-decision*|*awaiting*|*decision*|*operator-direction*|*post-mvp*)
+        echo "🙋 결정 PR 이 아직 머지되지 않았어요."
+        echo "   GitHub 에서 '🙋 결정 필요' PR 을 머지하면 자동 재개됩니다."
+        echo "   (머지 후 이 명령을 다시 실행하면 HALT 를 자동 해제합니다.)"
+        return ;;
+    esac
     rm -f "$ap/HALT"
-    echo "✅ HALT 파일을 지웠어요. 이제 클로드 코드에서 /loop를 다시 시작하세요:"
-    echo "   /loop .autopilot/PROMPT.md"
+    echo "✅ 비상정지 HALT 를 해제했어요. 이제 /loop .autopilot/PROMPT.md 를 다시 입력하세요."
   else
-    echo "ℹ️  HALT 파일이 원래 없었어요. 멈춰있다면 클로드 코드에서 /loop를 다시 입력하세요."
+    echo "ℹ️  HALT 파일이 원래 없었어요. 멈춰있다면 /loop .autopilot/PROMPT.md 를 다시 입력하세요."
   fi
 }
 
 시작안내() {
   줄
-  echo "🚀 오토파일럿 시작 방법"
+  echo "🚀 오토파일럿 시작"
   줄
+
+  # start 한 번으로 원격 머지 감지 + HALT 자동 해제까지 처리.
+  결정해소반영 >/dev/null 2>&1 || true
+
+  if [ -f "$ap/HALT" ]; then
+    body=$(tr -d '\r' < "$ap/HALT" 2>/dev/null | head -c 400)
+    case "$body" in
+      *pending-decision*|*awaiting*|*decision*|*operator-direction*|*post-mvp*)
+        echo "🙋 결정 PR 이 아직 머지되지 않았어요. GitHub 에서 '🙋 결정 필요' PR 을 머지해 주세요."
+        echo "   (머지 후 이 명령을 다시 실행하면 자동 재개됩니다.)"
+        줄; return ;;
+    esac
+  fi
+
   echo "클로드 코드(터미널 앱)를 열고 다음을 입력하세요:"
   echo ""
   echo "   /loop .autopilot/PROMPT.md"
