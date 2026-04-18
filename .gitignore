@@ -3,6 +3,8 @@ LOCK
 HALT
 NEXT_DELAY
 LAST_RESCHEDULE
+OPERATOR-LIVE.ko.html
+OPERATOR-LIVE.ko.json
 .audit-cache.*
 
 # METRICS.jsonl: choose one. Default: commit, so self-evolution can read history.

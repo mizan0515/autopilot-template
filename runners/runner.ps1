@@ -3,6 +3,13 @@
 # Loop: submit PROMPT.md to the AI CLI → wait for exit → sleep NEXT_DELAY → repeat.
 # The runner is intentionally dumb. All reasoning lives in PROMPT.md.
 #
+# ⚠️  WORKTREE HYGIENE (2026-04-18 lesson):
+#   DO NOT create a new `iter-<N>` worktree on every iteration — that pollutes the
+#   parent folder with dozens of stale worktrees that the loop never cleans up and
+#   eventually makes the filesystem unmanageable. If you customize this runner to
+#   use `git worktree`, create ONE live worktree (e.g. `../<project>.autopilot-live`)
+#   once and REUSE it every iter. Worktree-per-iter is a known template anti-pattern.
+#
 # Pick an AI CLI by setting env var AUTOPILOT_AI = 'claude' | 'codex' | 'custom'.
 #   claude  -> uses `claude` (Claude Code CLI) with `/loop` or direct prompt submission
 #   codex   -> uses `codex exec --file .autopilot/PROMPT.md`

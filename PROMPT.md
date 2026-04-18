@@ -272,6 +272,7 @@ At exit time, after writing NEXT_DELAY and before `Exit 0`:
 - **Step 4a — tool call.** Invoke `ScheduleWakeup(delaySeconds=<NEXT_DELAY>, prompt=<verbatim /loop input or `<<autonomous-loop-dynamic>>`>, reason=<1 sentence>)`. Capture the response string verbatim; you will need it for Step 4b.
 - **Step 4b — sentinel.** Write `.autopilot/LAST_RESCHEDULE` with 2 lines: ISO timestamp, then the raw tool response from 4a. No summarizing, no paraphrasing — literal copy.
 - **Step 4c — self-check.** Before writing Exit 0, mentally confirm: "Did I see `ScheduleWakeup` in my tool-call log this turn, and does `LAST_RESCHEDULE` have 2 lines with line 2 = its response?" If no → go back to 4a. If the tool is genuinely absent (external runner) → 4b uses the `external-runner: <name>` 2-line form and 4a is skipped.
+- **Step 4d — refresh operator dashboard (best-effort).** If `.autopilot/OPERATOR-TEMPLATE.ko.html` exists, run `pwsh -NoProfile -File .autopilot/관리자.ps1 대시보드` (or the shell equivalent) so `OPERATOR-LIVE.ko.{json,html}` reflect the current iter. This is the surface a non-developer operator opens via the `관리자 대시보드 열기.cmd` double-click. Failure here is non-fatal — log a PITFALL line and continue. Never block Exit 0 on a dashboard render error.
 
 ---
 
