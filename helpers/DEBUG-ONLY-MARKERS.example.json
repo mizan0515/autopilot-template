@@ -1,0 +1,11 @@
+{
+  "_comment": "Copy to <downstream>/DEBUG-ONLY-MARKERS.json (or .autopilot/DEBUG-ONLY-MARKERS.json). Each pair registers a file (literal path or glob) + a marker token that must sit behind a guard. Remove the example rows and add your own.",
+  "pairs": [
+    { "path": "Desktop/MainWindow.xaml.cs", "marker": "CCR_MANAGER_SIGNAL_JSON_OVERRIDE", "lookback": 12 },
+    { "path": "Tools/QA/*.cs", "marker": "QA_FORCE_GATE_PASS", "lookback": 8 }
+  ],
+  "guard_patterns": [
+    "^\\s*#if\\s+DEBUG\\b",
+    "^\\s*//\\s*@debug-only\\b"
+  ]
+}
