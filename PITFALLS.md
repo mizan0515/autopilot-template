@@ -134,7 +134,7 @@ Read by the loop on every boot. Each entry = one mistake already paid for; futur
 - Symptom: `npm install -g @openai/codex@latest` (or equivalent Claude self-update) invoked by a running loop iteration terminated the very Codex process driving the loop. `cardgame-dad-relay` #22 caught this after a peer-tool updater ran inside a Codex-hosted shell: the updater stopped `codex*` processes as a prereq and the session died mid-iteration. Same shape applies to Claude Code updating itself from a Claude-hosted shell.
 - Root cause: package-manager global installs on Windows often must stop the currently-running binary before replacing it; when the caller IS that binary, self-termination is guaranteed.
 - Next time: any updater script targeting the hosting agent's own binary must (a) detect the active session via agent-specific env vars (`CODEX_THREAD_ID`, `CODEX_SHELL`, `CODEX_INTERNAL_ORIGINATOR_OVERRIDE` for Codex; analogous for Claude) and (b) refuse to self-update unless an explicit opt-in flag is passed. Peer-symmetric policy: detect BOTH agents with symmetric strategy code — no `if codex only` branch. Log `status: blocked_self_update` with a reason instead of silently exiting 0.
-- Resolved-in: open — template should ship `Test-ActiveAgentSession` helper that downstreams wrap around any self-update path.
+- Resolved-in: PR #21 — `helpers/Test-ActiveAgentSession.ps1` ships peer-symmetric env-var registry for claude + codex; exit 5 when any agent is active so self-update paths block themselves.
 
 ### 2026-04-24 — Auto-retry without rollback amplifies the original breakage
 

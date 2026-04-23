@@ -14,6 +14,7 @@ paths can separate failure modes.
 | 2    | config problem (missing config file, parse error)     |
 | 3    | semantic-signal failure (zero-signal artifact)        |
 | 4    | policy violation (unguarded marker, forbidden term)   |
+| 5    | active-agent-session detected (self-update blocked)   |
 
 Helpers are **soft tripwires by default** — callers decide whether to
 propagate exit into doctor halt (`-Strict`), or warn-only.
@@ -28,6 +29,7 @@ propagate exit into doctor halt (`-Strict`), or warn-only.
 | `Verify-EvidenceArtifact.ps1`     | qa-evidence files pass exists-check while carrying zero signal  | per-call `-Kind` / `-RequiredFields` |
 | `Verify-DebugOnlyMarker.ps1`      | Smoke-only overrides leak into release builds                   | `DEBUG-ONLY-MARKERS.json`        |
 | `Test-GeneratedFilesIgnored.ps1`  | Generator output extensions leak into `git status` serially     | `GENERATORS.json`                |
+| `Test-ActiveAgentSession.ps1`     | Agent self-update from inside its own host session kills it     | (none — env-var probes)          |
 
 ## Installation pattern
 
