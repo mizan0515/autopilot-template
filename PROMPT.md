@@ -107,6 +107,55 @@ Additional auto-halt conditions (the loop writes `HALT` itself):
 
 ---
 
+## [IMMUTABLE:BEGIN cleanup-safety]
+
+### Autonomous cleanup — safety invariants
+
+The loop MAY delete stale files/folders autonomously, but every deletion MUST obey these invariants. Breaking one = the commit is wrong, regardless of intent. These rules are what separate "the loop cleans after itself" from "the loop silently deletes the operator's work."
+
+1. **Asset-pairing integrity.** If the project has paired metadata files (Unity `.meta`, TypeScript `.d.ts`, generated `.Designer.cs`, any tracked sidecar), never delete a primary file without its sidecar in the same commit, and never delete a sidecar without its primary. Breaking pairing silently corrupts the project's GUID/binding maps. Projects without such pairing can ignore this bullet but must explicitly declare so in `STATE.md` via `cleanup_pairing: none`.
+2. **Reference check before delete.** For any candidate under source/doc trees: grep the repo for the file's basename (no extension), for any path fragment that could be passed to a runtime loader (e.g. `require(...)`, `Resources.Load`, `AssetDatabase.LoadAssetAtPath`, dynamic-import strings, config keys), and for any string that would appear in test fixtures. Any non-self hit → file is NOT stale; do not delete.
+3. **Two-pass rule.** A candidate under source/doc trees must first land in `.autopilot/CLEANUP-CANDIDATES.md` with evidence (last git touch ISO, ref-check output, why-stale rationale) and survive ≥1 full iteration before a deletion PR is opened. Same-pass deletion is allowed only for: (a) files the loop itself created in the current iteration (scratch artifacts), (b) files already listed in root `.gitignore` that slipped into tracking, (c) obvious temp files matching `tmp-*`, `*.tmp`, `*~`, `*.bak` at repo root or a declared prototype dir.
+4. **Forbidden cleanup targets (never, regardless of staleness):** everything listed in STATE `protected_paths:`, plus `.git/`, `.githooks/`, `.autopilot/hooks/`, root `LICENSE`, root `README.md`, root `.gitignore`, any path already matched by root `.gitignore`, and any directory flagged as third-party / vendored (`node_modules/`, `Packages/`, `vendor/`, `Assets/Plugins/**`).
+5. **Batch cap + auto-merge gate.** ≤20 files deleted per cleanup PR. A cleanup PR deleting >5 files CANNOT auto-merge — promote to operator review regardless of other auto-merge permissions. A cleanup PR touching any file under source (`src/`, `Assets/Scripts/`, project-specific source roots) or `Document/` CANNOT auto-merge — operator review is mandatory.
+6. **Audit trail.** Every cleanup commit MUST append to `.autopilot/CLEANUP-LOG.md`: ISO timestamp, short SHA, PR URL, iteration number, deleted-file list, rollback command (`git revert <sha>`), evidence pointer (ref-check output or candidate-entry date). No audit line → the commit itself is evidence of rule break; add the line before pushing.
+7. **Never cleanup inside an Active product slice.** Cleanup is its own mode with its own branch (`dev/cleanup-<YYYYMMDD-HHMM>`). Do not opportunistically delete during a feature commit; hidden deletions in unrelated diffs are how silent regressions ship. If you notice a clean-up opportunity mid-feature, add it to `CLEANUP-CANDIDATES.md` and keep going with the feature.
+8. **No rename-disguised-as-delete.** Moves use `git mv` in a single commit; never delete+recreate with a different name.
+
+## [IMMUTABLE:END cleanup-safety]
+
+---
+
+## [IMMUTABLE:BEGIN mvp-gate]
+
+### MVP completion gate — progress tracking and terminal halt
+
+The loop's terminal goal is defined in `.autopilot/MVP-GATES.md`. That file is the living mutable scorecard of observable completion criteria; without it, "done" has no meaning and the loop grinds forever.
+
+Contract with `MVP-GATES.md`:
+
+1. First non-comment line must be `Gate count: <N>` where N is the total gate count. A missing or unparseable line → pre-commit rejects the commit (see `.autopilot/hooks/protect.sh`).
+2. Each gate is an OBSERVABLE completion criterion — not a task name. Evidence must be a runnable artifact: test name, log path, PR number, validator output, screenshot + qa-evidence JSON.
+3. Gate states: `[x]` = done with cited evidence. `[~]` = partial / in-progress. `[ ]` = not started or regressed.
+4. Flipping `[ ]`/`[~]` → `[x]` requires an evidence pointer appended in the same commit. No evidence → not flipped, no exceptions.
+5. Flipping `[x]` → `[~]`/`[ ]` requires cited regression evidence (failing commit sha, failing validator output). Silent reversion is a rule break.
+6. Gate count may not decrease without `OPERATOR: mvp-rescope <rationale>` in STATE.
+7. Removing the file entirely is treated as an IMMUTABLE violation regardless of which block enforces it — the halt trigger depends on the file's existence.
+
+Every Active iteration MUST:
+
+1. Re-read `.autopilot/MVP-GATES.md` during boot.
+2. When picking a slice (Active mode), prefer the lowest-numbered `[ ]` or regressed `[~]` gate unless a blocker, drift fix, or operator-focused BACKLOG item overrides. Record the chosen gate in STATE `active_task.gate:`.
+3. After the commit, re-evaluate the touched gate and append the flip to HISTORY + a `mvp_gates_passing: N/M` field on the METRICS line.
+
+**Auto-halt conditions (loop writes HALT and exits):**
+- All gates `[x]` AND no `OPERATOR: post-mvp <direction>` line in STATE → halt with `status: mvp-complete, awaiting operator direction`. The loop NEVER unilaterally picks what comes after MVP — that is always a decision PR.
+- Same gate has been `[ ]`/`[~]` for ≥5 consecutive iterations AND no commit in that span touched files scoped to that gate → halt with `status: stagnation on <gate>`. Prevents silent spinning on a blocker that needs human input.
+
+## [IMMUTABLE:END mvp-gate]
+
+---
+
 ## Mode: Active task
 
 Exactly one task per wake-up. No parallel tasks, no "while I'm here" drive-by fixes. One task = one commit-worthy slice.
@@ -150,6 +199,8 @@ Trigger: no active task, no P1 backlog, no high-severity findings, last 4 iters 
    - Validator / linter output if the project has one
 2. **Prior-art web search** — pick ONE current open design question from STATE.md `open_questions:` or from the latest BACKLOG item. Run ≤3 web-search queries (the host runner provides the web tool — e.g. Claude Code's `WebSearch`, Codex's `web.search`, or a generic curl to a search API; the prompt is runner-agnostic, the runner supplies the tool). Cache findings.
 3. **Append only. Never implement same-pass.** Add ≤10 lines to `.autopilot/FINDINGS.md` with date + severity (`high`/`med`/`low`/`info`) + concrete proposed-action line. Add one line to HISTORY.md. Write `NEXT_DELAY`, exit.
+
+**Streak-collapse rule (anti-rot).** If this idle-upkeep pass produced no new finding AND no state delta (no PR change, no metric delta, no operator directive), DO NOT append a fresh row to HISTORY.md or any operator dashboard. Instead, update a single in-place line of the form `(streak: idle-upkeep × N since iterM — no delta)` and bump N. Only append a genuine row when something actually changed. Same rule applies to any other mode whose iter produced no artifact. Rationale: operator dashboards exist to surface change, not to prove the loop woke up — that's what METRICS.jsonl is for.
 
 **Auto-promotion (NEXT iteration, not this one):**
 - `severity: high` → promoted to `active_task` on the very next iteration
@@ -212,6 +263,16 @@ The loop also keeps planning and spec documents honest. On every Active-mode com
 
 ---
 
+## HISTORY rotation
+
+`.autopilot/HISTORY.md` is a rolling log of recent iteration summaries. Real usage showed it grows to 50KB+ in a few hundred iterations, which blows the operator's read budget and burns tokens on every boot that references it.
+
+On every boot, after reading HISTORY.md: if it has >50 entries (count `^## ` or `^###` headings, whichever the project uses as an iter heading) OR its file size exceeds 20KB, move everything except the last 10 entries to `.autopilot/HISTORY-ARCHIVE.md` (append, newest-first at the top of the "recent" region, oldest-last). Commit the rotation on the current branch as `chore: rotate HISTORY to archive`. One rotation commit per iter max.
+
+Operator dashboards (`대시보드.md` or equivalent) follow the same rule with a 100-entry / 40KB threshold, rotating into `대시보드-ARCHIVE.md`. The streak-collapse rule in Idle-upkeep mode keeps this manageable in the normal case — rotation is the failsafe when streak-collapse was bypassed or a burst of real activity ran long.
+
+---
+
 ## Pacing (NEXT_DELAY)
 
 Before exit, write an integer in [60, 3600] to `.autopilot/NEXT_DELAY`. Runner reads it for the next sleep. `ScheduleWakeup` clamps the same range.
@@ -244,6 +305,42 @@ Before exit (every iteration), in this exact order:
 7. Exit with code 0. External runners read NEXT_DELAY and re-submit THIS file verbatim after sleeping; `/loop` dynamic mode relies on the Step 5 tool call.
 
 ## [IMMUTABLE:END exit-contract]
+
+---
+
+## METRICS schema convention (mutable — extends exit-contract Step 2)
+
+The IMMUTABLE:exit-contract line specifies the **required** METRICS fields. Real usage revealed that downstream repos immediately extend the schema with project-specific fields — which is fine, but unmanaged extension makes cross-repo analysis brittle and lets important fields silently drop. This mutable section defines the tiered convention.
+
+**Tier 1 — required (IMMUTABLE, every line must have these):**
+
+`iter`, `ts`, `mode`, `status`, `duration_s`, `files_read`, `bash_calls`, `commits`, `prs`, `budget_exceeded`
+
+**Tier 2 — reserved (write when available, same names across projects):**
+
+- `reschedule: "tool-called" | "external-runner: <name>" | "halted"` — from exit-contract Step 5.
+- `mvp_gates_passing: "N/M"` — from `[IMMUTABLE:mvp-gate]` §3.
+- `cumulative_merges: <int>` — total PRs merged since loop boot; useful for velocity.
+- `pending_review: [<pr-nums>]` — PRs opened but not yet merged (for awaiting-review patterns).
+- `idle_upkeep_streak: <int>` — monotonic counter; resets on any non-upkeep iter.
+- `merged: 0 | 1` — did the Active iter merge a PR? Prefer this boolean form over `merged_this_iter` (evidence: `D:\Unity\card game` iters 108–110 use `merged: 1`). If you need the PR number, put it in `warnings` or a Tier 3 field; don't overload `merged`.
+- `mcp_calls: <int>` — count of MCP tool calls (Unity MCP, Claude Preview, etc.). Surfaced as Tier 2 because any project with an external tool bridge benefits; absent projects just omit it.
+- `warnings: "<short sentence>"` — non-fatal issues worth surfacing (branch survivors, evidence repair, etc).
+
+**Tier 3 — project extension (free; name with project prefix):**
+
+Anything else. Prefix with a short project tag to avoid collisions across rollups (`unity_screenshots`, `relay_editmode_tests`, `bq_rows_scanned`). Do NOT reuse Tier-2 names for different semantics.
+
+**Rules for evolution:**
+
+- A field that starts appearing in ≥3 consecutive iters should be declared (in this section) as Tier 2 if it is generic, or kept Tier 3 with a prefix.
+- Renaming a Tier 1 or Tier 2 field requires a migration commit that backfills the previous 20 iterations.
+- Dropping a Tier 1 field is a contract violation; dropping a Tier 2 field requires an `OPERATOR: retire-metric <name>` directive.
+
+**Anti-patterns spotted in real usage:**
+
+- `METRICS.jsonl` lines in one downstream dropped `ts` entirely (only `iter` was present). This breaks the reschedule watchdog's cache-TTL math and breaks any time-series tooling. `ts` is Tier 1; never drop it.
+- Unity downstream emitted `editmode_tests: 17`, `screenshots: 1` unprefixed. These are Unity-specific; they should be `unity_editmode_tests` / `unity_screenshots`. Fix on next write — do not rename historical lines (Tier 2/3 rename = migration).
 
 ---
 
@@ -423,6 +520,21 @@ active_task: null           # {slug, plan: [bullets], started_iter}
 # spec_docs: [SPEC.md]      # optional
 # reference_docs: []        # capability matrices, etc.
 open_questions: []
+
+# Auto-merge refuses if the PR diff touches any of these (uncomment and populate per project):
+# protected_paths:
+#   - .autopilot/PROMPT.md
+#   - .autopilot/project.sh
+#   - .autopilot/project.ps1
+#   - .autopilot/hooks/
+#   - <project core contracts, prompt libraries, validators>
+
+# Sticky operator directives (persist across iters until operator removes). Loop writes these
+# via resolved decision PRs; operator never edits by hand. Example:
+# operator_directives_sticky:
+#   - "non-core PRs auto-merge on green build"
+#   - "core doc PRs require operator Korean review"
+#   - "every iter logs to HISTORY + dashboard + METRICS"
 
 # awaiting-decision 필드 (루프가 관리. 관리자는 수정하지 않음):
 # decision_slug: null
