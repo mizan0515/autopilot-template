@@ -57,7 +57,7 @@ Read by the loop on every boot. Each entry = one mistake already paid for; futur
 - Symptom: `.autopilot/대시보드.md` (or equivalent operator dashboard) grew 20+ nearly-identical `idle-upkeep streak=N · R-REVIEW 지속 · 변경 없음` rows. Scrolling past them to find the last real event cost operator time and agent read budget.
 - Root cause: every iter appended a full status row even when nothing changed, treating the dashboard as a log rather than a state surface.
 - Next time: during idle-upkeep (or any mode whose iter produced no new artifact/finding/PR), do not append a new dashboard row. Instead, update a single `(streak: idle-upkeep × N since iterM)` line in place, and bump N. Only append a fresh row when state actually changes (new PR, new finding, status transition, operator directive). HISTORY.md follows the same rule: collapse consecutive no-delta iters into one counter line.
-- Resolved-in: open — add to Idle-upkeep and dashboard-render sections of PROMPT.md.
+- Resolved-in: PR #1 — upstream PROMPT.md Idle-upkeep section carries the streak-collapse rule (line 203) and the HISTORY-rotation / dashboard section cross-references it (line 272). Downstream wiring: codex-claude-relay PR #105, cardgame-dad-relay PR #36.
 
 ### 2026-04-24 — Per-iteration worktrees fill the parent directory with dead `iter-*` folders
 
@@ -71,7 +71,7 @@ Read by the loop on every boot. Each entry = one mistake already paid for; futur
 - Symptom: short doc-gardening / dashboard-refresh / validator-rerun iterations loaded the full `.autopilot/PROMPT.md` (IMMUTABLE blocks, probation check, mode dispatch, brainstorm rules, decision-PR workflow) even though the task read 1 file and wrote 1 line. Token burn per iter was ~10× the actual work.
 - Root cause: only one prompt existed. The full boot is load-bearing for Active mode but pure overhead for small maintenance runs.
 - Next time: for narrow maintenance loops, run with `AUTOPILOT_PROMPT_RELATIVE=.autopilot/PROMPT.lite.md` (or the runner's lite-mode flag). Lite prompt skips PITFALLS/EVOLUTION/FINDINGS reads, forbids PRs and self-evolution, keeps only HALT + IMMUTABLE + exit-contract + reschedule discipline. Escalate back to full `PROMPT.md` the moment the task needs a PR, a gate flip, or a decision.
-- Resolved-in: open — PROMPT.lite.md seeded in autopilot-template 2026-04-24.
+- Resolved-in: PR #26 — PROMPT.lite.md seeded and PROMPT.md now carries a "Lite-mode reentry criteria" section (≤2 reads, ≤1 write, no PR, no IMMUTABLE touch, no MVP/decision/evolution). Runners honor `AUTOPILOT_PROMPT_RELATIVE`; downstream `-Lite`/`AUTOPILOT_LITE=1` wiring tracked as separate per-repo PRs.
 
 ### 2026-04-24 — HISTORY.md grew to 50KB+ because rotation rule was advisory only
 
