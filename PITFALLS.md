@@ -148,7 +148,7 @@ Read by the loop on every boot. Each entry = one mistake already paid for; futur
 - Symptom: Unity downstream ran three back-to-back refactor PRs (#275 QA screenshot capture, #276 QA autoplay, #277 battle bootstrap/reward) whose sole purpose was "extract helpers from a growing file so future edits don't read the whole thing." Before the refactors, each iter touching `BattleManager.cs` (~600 lines) had to read and context-carry the full file even when editing one helper; after extraction into narrow siblings, the same edits cost ~1/5 the tokens.
 - Root cause: when a file crosses ~400–500 lines AND is edited by the loop repeatedly, every subsequent iter pays the full read cost for a localized change. The growth is gradual, so the threshold is crossed silently and no single iter flags it.
 - Next time: treat "file ≥500 lines AND edited by the loop in ≥3 of the last 10 iters" as a proactive refactor signal. Extract narrow-purpose helper siblings (one concern per file) before attempting the next feature edit. Downstreams have started calling these "token-saving seams" — helper seams whose justification is iter-cost, not runtime architecture. Budget the seam refactor as its own PR with no behavior delta; the behavior PR follows on the now-smaller surface.
-- Resolved-in: open — template could surface a `project.sh hot-files` readout (files edited N+ times in last M iters, sorted by size) so downstreams see the candidates.
+- Resolved-in: PR #25 — `helpers/Get-HotFiles.ps1` ships in autopilot-template; default 30-day lookback, MinEdits=3, sorted by current file size, JSON payload so downstreams can wire the readout into their `audit` or dashboard.
 
 ### 2026-04-24 — Loop re-discovers "what to do next" every iter instead of asking a pre-computed helper
 

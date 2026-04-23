@@ -32,6 +32,7 @@ propagate exit into doctor halt (`-Strict`), or warn-only.
 | `Test-ActiveAgentSession.ps1`     | Agent self-update from inside its own host session kills it     | (none — env-var probes)          |
 | `Validate-Metrics.ps1`            | METRICS.jsonl silently drops Tier 1 fields (e.g. `ts`)          | (argv `-Tier1Fields`)            |
 | `Test-SurfaceCarriesIdentity.ps1` | Output surfaces serially retrofit `repo_identity` one PR at a time | `SURFACES.json`              |
+| `Get-HotFiles.ps1`                | Recurring "token-saving seam" PRs — surface hot + large files   | (argv)                           |
 
 ## Installation pattern
 
