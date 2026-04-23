@@ -33,6 +33,7 @@ propagate exit into doctor halt (`-Strict`), or warn-only.
 | `Validate-Metrics.ps1`            | METRICS.jsonl silently drops Tier 1 fields (e.g. `ts`)          | (argv `-Tier1Fields`)            |
 | `Test-SurfaceCarriesIdentity.ps1` | Output surfaces serially retrofit `repo_identity` one PR at a time | `SURFACES.json`              |
 | `Get-HotFiles.ps1`                | Recurring "token-saving seam" PRs — surface hot + large files   | (argv)                           |
+| `Test-HistorySize.ps1`            | HISTORY.md / dashboard drift past rotation thresholds (advisory-only rule fails silently) | (argv: paths + thresholds) |
 
 ## Installation pattern
 
