@@ -85,7 +85,7 @@ Read by the loop on every boot. Each entry = one mistake already paid for; futur
 - Symptom: `codex-claude-relay/.autopilot/METRICS.jsonl` lines looked like `{"iter":117,"mode":"post-mvp-idle","cumulative_merges":31,...}` — no `ts`. The reschedule watchdog's staleness calculation (`LAST_RESCHEDULE` line 1 timestamp age) still worked, but any cross-iter time-series tool or `status: env-broken in 3 consecutive iters` halt condition couldn't reason about wall-clock gaps. Meanwhile `Unity card game` METRICS lines carried `mcp_calls`, `editmode_tests`, `screenshots`, and a long free-form `budget_exceeded` reason — a parallel extension with no shared naming convention.
 - Root cause: IMMUTABLE:exit-contract Step 2 listed the required schema but did not address extension. Downstreams dropped required fields and added bespoke ones without a shared tier.
 - Next time: see the new "METRICS schema convention" section in PROMPT.md. Tier 1 required (including `ts`), Tier 2 reserved names (`mvp_gates_passing`, `cumulative_merges`, `pending_review`, `idle_upkeep_streak`, `merged`, `mcp_calls`, `warnings`, `reschedule`), Tier 3 project extensions must use a project prefix. Never drop a Tier 1 field.
-- Resolved-in: open — consider a `tools/Validate-Metrics.ps1` that greps the last 20 lines for Tier 1 presence.
+- Resolved-in: PR #22 — `helpers/Validate-Metrics.ps1` ships in autopilot-template; default tails last 20 lines and asserts Tier 1 (`ts`, `iter`, `mode`), with optional `-Strict -ProjectPrefix` for Tier 3 naming enforcement. Exit 3 on missing Tier 1.
 
 ### 2026-04-24 — Template `runners/` scripts diverged from real-usage runners by ~4×
 

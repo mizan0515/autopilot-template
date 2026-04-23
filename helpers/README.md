@@ -30,6 +30,7 @@ propagate exit into doctor halt (`-Strict`), or warn-only.
 | `Verify-DebugOnlyMarker.ps1`      | Smoke-only overrides leak into release builds                   | `DEBUG-ONLY-MARKERS.json`        |
 | `Test-GeneratedFilesIgnored.ps1`  | Generator output extensions leak into `git status` serially     | `GENERATORS.json`                |
 | `Test-ActiveAgentSession.ps1`     | Agent self-update from inside its own host session kills it     | (none — env-var probes)          |
+| `Validate-Metrics.ps1`            | METRICS.jsonl silently drops Tier 1 fields (e.g. `ts`)          | (argv `-Tier1Fields`)            |
 
 ## Installation pattern
 
