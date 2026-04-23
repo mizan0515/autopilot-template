@@ -1,0 +1,20 @@
+{
+  "_comment": "Copy to <downstream>/SURFACES.json or .autopilot/SURFACES.json. Register every output surface that crosses a repo boundary (dashboard JSON, generated markdown, operator HTML, terminal writeback file). Each must declare its kind and the identity evidence it should carry. Remove the example rows and add your own.",
+  "surfaces": [
+    {
+      "path": "profiles/card-game/generated-manager-status.json",
+      "kind": "json",
+      "required_fields": ["repo_identity", "repo_identity.remote_origin", "repo_identity.branch"]
+    },
+    {
+      "path": "profiles/card-game/generated-manager-status.md",
+      "kind": "text",
+      "required_pattern": "repo_identity:\\s*\\S+"
+    },
+    {
+      "path": ".autopilot/OPERATOR-LIVE.ko.html",
+      "kind": "text",
+      "required_pattern": "repo[-_]identity"
+    }
+  ]
+}
