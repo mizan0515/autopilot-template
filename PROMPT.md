@@ -373,6 +373,31 @@ At exit time, after writing NEXT_DELAY and before `Exit 0`:
 
 ---
 
+## Lite-mode reentry criteria
+
+`PROMPT.lite.md` exists for short maintenance iterations where the full boot
+cost (PITFALLS / EVOLUTION / FINDINGS scan, MVP-gate, decision-PR workflow)
+is pure overhead. Use the lite prompt only when ALL of the following hold
+for the chosen task:
+
+- expected file **reads ≤ 2** (beyond STATE.md + PROJECT-RULES.md)
+- expected file **writes ≤ 1**
+- **no PR** will be opened (direct commit to maintenance branch or no commit)
+- no `[IMMUTABLE:*]` block is touched
+- no MVP-gate flip, operator-decision, or self-evolution step is needed
+
+If any of these is violated mid-run, abort the lite iter, write `status:
+escalate-to-full` in STATE.md, and relaunch with the full `PROMPT.md`. Do
+not silently upgrade inside a lite run — the budget/probation stack lives
+in the full prompt.
+
+Downstream runners (e.g. `.autopilot/project.ps1`) should expose an opt-in
+`-Lite` switch or `AUTOPILOT_LITE=1` env that sets
+`AUTOPILOT_PROMPT_RELATIVE=.autopilot/PROMPT.lite.md` before invoking the
+runner, so operators can choose cadence per-task instead of per-repo.
+
+---
+
 ## Runner-agnostic invocation contract
 
 This prompt is a pure text file. The runner supplies:
