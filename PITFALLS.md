@@ -78,7 +78,7 @@ Read by the loop on every boot. Each entry = one mistake already paid for; futur
 - Symptom: `.autopilot/HISTORY.md` reached 56KB / 1500+ lines in `codex-claude-relay`. Every boot read the full file, every idle-upkeep scan re-scanned it, and the operator dashboard inherited the bloat. Old entries past the 10th were never loaded usefully — they were pure token overhead.
 - Root cause: PROMPT.md mentioned "HISTORY trims to last 10 entries (older → HISTORY-ARCHIVE.md)" in the "UX-is-terrible assumptions" section, but no actual rotation step existed. The rule was an assumption, not an executable behavior.
 - Next time: rotation is now an explicit boot-time step (see the "HISTORY rotation" section in PROMPT.md). Thresholds: >50 entries OR >20KB for HISTORY, 100/40KB for the operator dashboard. One rotation commit per iter. Archive file is `HISTORY-ARCHIVE.md` / `대시보드-ARCHIVE.md`.
-- Resolved-in: open — enforce via a pre-commit check on file size later if needed.
+- Resolved-in: PR #29 — `helpers/Test-HistorySize.ps1` ships in autopilot-template (soft-by-default, `-Strict` exit 4). Downstream pre-commit wiring: codex-claude-relay PR #106, cardgame-dad-relay PR #38 (warn-only, non-blocking).
 
 ### 2026-04-24 — METRICS.jsonl dropped `ts` field in one downstream; schema drifted unmanaged
 
