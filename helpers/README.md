@@ -27,6 +27,7 @@ propagate exit into doctor halt (`-Strict`), or warn-only.
 | `Verify-Terminology.ps1`          | Domain terms regress to similar-sounding wrong variants         | `TERMINOLOGY.md` or `.json`      |
 | `Verify-EvidenceArtifact.ps1`     | qa-evidence files pass exists-check while carrying zero signal  | per-call `-Kind` / `-RequiredFields` |
 | `Verify-DebugOnlyMarker.ps1`      | Smoke-only overrides leak into release builds                   | `DEBUG-ONLY-MARKERS.json`        |
+| `Test-GeneratedFilesIgnored.ps1`  | Generator output extensions leak into `git status` serially     | `GENERATORS.json`                |
 
 ## Installation pattern
 
