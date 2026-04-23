@@ -1,0 +1,17 @@
+{
+  "_comment": "Copy to <downstream>/GENERATORS.json or .autopilot/GENERATORS.json. Each entry is a template-owned generator that emits runtime artifacts; Test-GeneratedFilesIgnored.ps1 runs each, then fails if anything the generator touched is NOT covered by .gitignore. Remove examples, add your own.",
+  "generators": [
+    {
+      "name": "operator-live-dashboard",
+      "command": "pwsh",
+      "args": ["-NoProfile", "-File", "tools/Write-OperatorLive.ps1"],
+      "expected_touch_globs": [".autopilot/OPERATOR-LIVE.ko.*"]
+    },
+    {
+      "name": "compact-status",
+      "command": "pwsh",
+      "args": ["-NoProfile", "-File", "tools/Write-CompactStatus.ps1"],
+      "expected_touch_globs": ["profiles/*/generated-*"]
+    }
+  ]
+}
