@@ -22,7 +22,7 @@ if ! git rev-parse --verify HEAD >/dev/null 2>&1; then
   exit 0
 fi
 
-BLOCKS=(core-contract boot budget blast-radius halt exit-contract wake-reschedule decision-pr-invariants)
+BLOCKS=(core-contract boot budget blast-radius halt cleanup-safety mvp-gate exit-contract wake-reschedule decision-pr-invariants)
 
 tmp_base=$(mktemp); tmp_head=$(mktemp)
 trap 'rm -f "$tmp_base" "$tmp_head"' EXIT
@@ -51,5 +51,39 @@ for name in "${BLOCKS[@]}"; do
     exit 1
   fi
 done
+
+# ---------------------------------------------------------------------------
+# MVP-GATES contract: the halt trigger depends on a parseable "Gate count: N"
+# line in .autopilot/MVP-GATES.md. Reject any commit that would leave the
+# file missing the line (or remove the file entirely).
+# ---------------------------------------------------------------------------
+MVPGATES=".autopilot/MVP-GATES.md"
+
+if git diff --cached --name-only | grep -qx "$MVPGATES"; then
+  if git diff --cached --diff-filter=D --name-only | grep -qx "$MVPGATES"; then
+    echo "protect.sh: $MVPGATES deletion rejected — this file is the MVP halt trigger."
+    echo "  → rescope via OPERATOR: mvp-rescope <rationale> in STATE.md instead."
+    exit 1
+  fi
+  tmp_gates=$(mktemp); trap 'rm -f "$tmp_base" "$tmp_head" "$tmp_gates"' EXIT
+  git show ":$MVPGATES" > "$tmp_gates"
+  if ! grep -qE "^Gate count: [0-9]+" "$tmp_gates"; then
+    echo "protect.sh: $MVPGATES must contain a parseable 'Gate count: <N>' line."
+    echo "  → the [IMMUTABLE:mvp-gate] halt conditions depend on it."
+    exit 1
+  fi
+fi
+
+# ---------------------------------------------------------------------------
+# Hard cap: >20 file deletions per commit is always rejected, matching
+# [IMMUTABLE:cleanup-safety] rule 5. Trailer-gated >5 check lives in a
+# commit-msg hook (not enforced here).
+# ---------------------------------------------------------------------------
+deleted_count=$(git diff --cached --name-only --diff-filter=D | wc -l | tr -d ' ')
+if [ "$deleted_count" -gt 20 ]; then
+  echo "protect.sh: commit deletes $deleted_count files; hard cap is 20 per commit."
+  echo "  → reject. Split into multiple cleanup PRs."
+  exit 1
+fi
 
 exit 0

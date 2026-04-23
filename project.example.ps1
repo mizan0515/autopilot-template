@@ -5,15 +5,43 @@
 param([string]$Verb = 'help')
 
 $ErrorActionPreference = 'Stop'
+$AutopilotRoot = '.autopilot'
+$LiveSignalPath = Join-Path $AutopilotRoot 'live-signal.json'
+$StatusPath = Join-Path $AutopilotRoot 'status-summary.txt'
+$DoneMarkerPath = Join-Path $AutopilotRoot 'done.marker'
+$CompactStatusMaxAgeMinutes = 30
 
 switch ($Verb) {
   'doctor' {
     foreach ($cmd in 'git','gh') {
       if (-not (Get-Command $cmd -ErrorAction SilentlyContinue)) { Write-Error "missing: $cmd"; exit 1 }
     }
+    if (-not (Test-Path $AutopilotRoot)) { Write-Error "missing: $AutopilotRoot"; exit 1 }
+    if (-not (Test-Path $LiveSignalPath)) { Write-Warning "missing compact live signal: $LiveSignalPath" }
+    if (-not (Test-Path $StatusPath)) { Write-Warning "missing status summary: $StatusPath" }
+    $overrideVars = @(
+      'CCR_MANAGER_SIGNAL_JSON_OVERRIDE',
+      'CCR_MANAGER_SIGNAL_TEXT_OVERRIDE'
+    )
+    $leaked = @($overrideVars | Where-Object { -not [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($_)) })
+    if ($leaked.Count -gt 0) {
+      Write-Error "test-only override leak detected: $($leaked -join ', ')"
+      exit 1
+    }
+    foreach ($path in @($LiveSignalPath, $StatusPath)) {
+      if (Test-Path $path) {
+        $ageMinutes = ((Get-Date) - (Get-Item $path).LastWriteTime).TotalMinutes
+        if ($ageMinutes -gt $CompactStatusMaxAgeMinutes -and -not (Test-Path $DoneMarkerPath)) {
+          Write-Error "stale compact status artifact: $path (${ageMinutes:n1} min old, limit ${CompactStatusMaxAgeMinutes} min, no done marker)"
+          exit 1
+        }
+      }
+    }
     # Add project checks:
     #   if (-not (Get-Command dotnet)) { exit 1 }
     #   if (-not (Get-Command node))   { exit 1 }
+    # Add bounded-wait checks:
+    #   if (Test-Path (Join-Path $AutopilotRoot 'waiting.lock')) { exit 1 }
     Write-Host 'ok'
   }
 
@@ -29,6 +57,16 @@ switch ($Verb) {
   'audit' {
     # Dependency / vuln audit for Idle-upkeep. Exit 0; findings to stdout or cache file.
     Write-Host 'project.ps1 audit: customize me'
+  }
+
+  'status' {
+    # Compact operator surface: one machine-readable signal + one short summary.
+    if (Test-Path $LiveSignalPath) { Get-Content $LiveSignalPath -TotalCount 80 }
+    else { Write-Warning "missing: $LiveSignalPath" }
+    if (Test-Path $StatusPath) { Get-Content $StatusPath -TotalCount 40 }
+    else { Write-Warning "missing: $StatusPath" }
+    if (Test-Path $DoneMarkerPath) { Write-Host "done-marker: present ($DoneMarkerPath)" }
+    else { Write-Host "done-marker: absent" }
   }
 
   'start' {
@@ -85,6 +123,7 @@ Verbs:
   doctor   Fast env health check. Exit 0 = OK, nonzero = env-broken.
   test     Run project tests + build + lint. Exit 0 = green, nonzero = red.
   audit    Dependency/vuln audit for Idle-upkeep.
+  status   Print compact live signal + short status summary + done marker state.
   start    Start the loop via runner.ps1.
   stop     Create .autopilot\HALT (polite stop).
   resume   Remove .autopilot\HALT.

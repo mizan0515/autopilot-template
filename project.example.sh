@@ -10,6 +10,11 @@
 
 set -euo pipefail
 verb="${1:-help}"
+autopilot_root=".autopilot"
+live_signal_path="$autopilot_root/live-signal.json"
+status_path="$autopilot_root/status-summary.txt"
+done_marker_path="$autopilot_root/done.marker"
+compact_status_max_age_minutes="${COMPACT_STATUS_MAX_AGE_MINUTES:-30}"
 
 case "$verb" in
   doctor)
@@ -17,10 +22,35 @@ case "$verb" in
     # Exit 0 = env OK; non-zero = env broken (loop will back off 1800s).
     command -v git   >/dev/null || { echo "missing: git"; exit 1; }
     command -v gh    >/dev/null || { echo "missing: gh"; exit 1; }
+    [ -d "$autopilot_root" ] || { echo "missing: $autopilot_root"; exit 1; }
+    [ -f "$live_signal_path" ] || echo "WARN: missing compact live signal: $live_signal_path"
+    [ -f "$status_path" ] || echo "WARN: missing status summary: $status_path"
+    leaked=()
+    [ -n "${CCR_MANAGER_SIGNAL_JSON_OVERRIDE:-}" ] && leaked+=("CCR_MANAGER_SIGNAL_JSON_OVERRIDE")
+    [ -n "${CCR_MANAGER_SIGNAL_TEXT_OVERRIDE:-}" ] && leaked+=("CCR_MANAGER_SIGNAL_TEXT_OVERRIDE")
+    if [ "${#leaked[@]}" -gt 0 ]; then
+      echo "test-only override leak detected: ${leaked[*]}"
+      exit 1
+    fi
+    for path in "$live_signal_path" "$status_path"; do
+      if [ -f "$path" ]; then
+        now_epoch="$(date +%s)"
+        file_epoch="$(date -r "$path" +%s 2>/dev/null || stat -c %Y "$path" 2>/dev/null || echo 0)"
+        if [ "$file_epoch" -gt 0 ]; then
+          age_minutes=$(( (now_epoch - file_epoch) / 60 ))
+          if [ "$age_minutes" -gt "$compact_status_max_age_minutes" ] && [ ! -f "$done_marker_path" ]; then
+            echo "stale compact status artifact: $path (${age_minutes} min old, limit ${compact_status_max_age_minutes} min, no done marker)"
+            exit 1
+          fi
+        fi
+      fi
+    done
     # Add project-specific checks here:
     #   command -v node    >/dev/null
     #   command -v dotnet  >/dev/null
     #   command -v python3 >/dev/null
+    # Add bounded-wait checks:
+    #   [ -f "$autopilot_root/waiting.lock" ] && exit 1
     echo "ok"
     ;;
 
@@ -42,6 +72,13 @@ case "$verb" in
     #   dotnet list package --outdated --vulnerable > .autopilot/.audit-cache.txt
     echo "project.sh audit: customize me" >&2
     exit 0
+    ;;
+
+  status)
+    # Compact operator surface: one machine-readable signal + one short summary.
+    if [ -f "$live_signal_path" ]; then sed -n '1,80p' "$live_signal_path"; else echo "WARN: missing: $live_signal_path"; fi
+    if [ -f "$status_path" ]; then sed -n '1,40p' "$status_path"; else echo "WARN: missing: $status_path"; fi
+    if [ -f "$done_marker_path" ]; then echo "done-marker: present ($done_marker_path)"; else echo "done-marker: absent"; fi
     ;;
 
   start)
@@ -103,6 +140,7 @@ Verbs:
   doctor   Fast env health check (≤60s). Exit 0 = OK, nonzero = env-broken.
   test     Run project tests + build + lint. Exit 0 = green, nonzero = red.
   audit    Dependency/vuln audit for Idle-upkeep. Exit 0 always; findings in stdout.
+  status   Print compact live signal + short status summary + done marker state.
   start    Start the loop via the PowerShell/bash runner.
   stop     Create .autopilot/HALT (polite stop).
   resume   Remove .autopilot/HALT.

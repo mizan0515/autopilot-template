@@ -78,6 +78,24 @@ Every iteration picks exactly one mode and exits:
 
 The loop also **autonomously maintains plan and spec docs**: every Active/Upkeep pass it reads the docs listed in STATE `plan_docs:` and `spec_docs:`, detects drift from the code, fixes small drift in-line, and auto-promotes large drift to an active task. Infinite improvement = backlog auto-refill (Brainstorm) + backlog auto-drain (Active) + doc self-sync + prompt self-evolution, all bounded by budgets and guardrails.
 
+## Where this template fits
+
+In real use this template is usually the outer layer of a three-layer stack:
+
+- `autopilot-template` = loop, operator control, compact status, doctor checks
+- `dad-v2-system-template` = peer turn/session contract
+- product repo = domain code, domain evidence, product dashboards, product policies
+
+Downstream adopters should prefer compact proof artifacts over raw log reading:
+one machine-readable signal, one human-readable status, one bounded done marker.
+Product-specific operator wording or governance stays downstream unless it is
+clearly reusable across repos.
+Use [`INTEGRATION-CHECKLIST.md`](./INTEGRATION-CHECKLIST.md) to adapt that
+pattern into a real project without mixing outer-loop rules with DAD runtime
+rules or product-only operations.
+See [`examples/compact-status/`](./examples/compact-status/) for a minimal
+artifact set that `project.ps1 status` / `project.sh status` can expose.
+
 ## Install into a project
 
 ```bash
@@ -91,6 +109,13 @@ chmod +x .autopilot/hooks/protect.sh .autopilot/runners/runner.sh .autopilot/관
 mv .autopilot/project.example.sh  .autopilot/project.sh      # Unix
 # OR
 mv .autopilot/project.example.ps1 .autopilot/project.ps1     # Windows
+
+# Define the compact operator artifacts in your wrapper:
+#   .autopilot/live-signal.json
+#   .autopilot/status-summary.txt
+#   .autopilot/done.marker
+# Then `project.sh status` / `project.ps1 status` can expose the cheapest
+# reliable source of truth for operators and agents.
 
 # Install the protect hook (prevents self-evolution touching IMMUTABLE blocks):
 ln -sf "$(pwd)/.autopilot/hooks/protect.sh" .git/hooks/pre-commit
